@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+
+# Claude Code local settings
+.claude/
+
+# VS Code
+.vscode/
+
+# Bot profiles — track personality.md, ignore runtime files
+bot_profiles/*/.cookies
+bot_profiles/*/turn.json
+bot_profiles/*/action.json
+bot_profiles/*/state.json
+bot_profiles/*/history.jsonl
+bot_profiles/*/bridge.pid
+bot_profiles/*/.watcher_*
+
+# Orchestrator runtime files
+game.json
+pending-turns.json
+orchestrator-heartbeat.json
+orchestrator.pid

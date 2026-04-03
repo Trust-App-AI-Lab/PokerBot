@@ -1,0 +1,15 @@
+node_modules/
+.env
+__pycache__/
+scripts/.last_phase*
+
+# Legacy flat files (may still appear if old scripts run)
+.cookies
+.cookies-*
+state*.json
+turn*.json
+action*.json
+history*.jsonl
+bridge*.log
+bridge*.pid
+.watcher_*
