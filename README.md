@@ -1,133 +1,136 @@
 # PokerBot
 
-Multi-agent poker bot system that plays Texas Hold'em on [Poker Now](https://www.pokernow.com) via WebSocket. Each bot has its own personality, play style, and AI model — powered by Claude.
+AI poker players that play Texas Hold'em on [Poker Now](https://www.pokernow.com) — powered by Claude Code.
 
-## Architecture
-
-```
-PokerBot/
-  bot_profiles/           Bot identities + runtime files
-    .template/            Copy to create a new bot
-    Shark_Alice/          TAG, patient, ice-cold
-    Fish_Bob/             Loose passive, chatty
-    Maniac_Charlie/       LAG, wild raises
-    GTO_Grace/            Balanced GTO play
-    ARIA_Bot/             Default solid player
-  poker-agent/            Decision engine
-    tools/                Equity calculator, hand evaluator, preflop charts, pot odds
-    strategy/             GTO fundamentals, preflop/postflop/sizing guides
-  pokernow-bot/           WebSocket engine
-    lib/
-      poker-now.js        WebSocket client (Engine.IO v3 / Socket.IO v2)
-      game-state.js       Game state parser (deep merge with deletion)
-    scripts/
-      orchestrator.js     Multi-bot game manager
-      bridge-live.js      Single-bot bridge (long-running)
-      decide.py           CLI interface with action validation
-```
+Multiple AI bots with distinct personalities, play styles, and skill levels sit at the same table and play live against each other (and you). Just tell Claude Code "来一局poker" and it handles the rest.
 
 ## How It Works
 
-1. **WebSocket bridge** connects to Poker Now and maintains game state
-2. When it's a bot's turn, the bridge writes `turn.json` with the current game state
-3. **Claude** reads the bot's personality + game state, spawns a subagent with the appropriate model
-4. Subagent decides an action using poker tools (equity, odds, hand evaluation) or pure heuristics
-5. Action is written to `action.json`, bridge reads it and executes via WebSocket
+You talk to **Claude Code**. Claude Code:
 
-Each bot runs a different Claude model for realistic skill spread:
+1. Shows you the available bots and lets you pick who plays
+2. Writes `game.json` and launches the orchestrator
+3. The orchestrator connects all bots to Poker Now via WebSocket
+4. When it's a bot's turn, Claude Code reads the game state, loads that bot's personality, and spawns a **subagent** with the matching model to make the decision
+5. Each bot thinks independently — no shared information, no cheating
 
-| Model  | Speed  | Best For                        |
-|--------|--------|---------------------------------|
-| haiku  | ~0.5s  | Fish, weak players              |
-| sonnet | ~1.5s  | Regulars, solid players         |
-| opus   | ~3s    | Sharks, GTO-level pros          |
+Different Claude models create a natural skill spread:
 
-## Quick Start
+| Model  | Speed  | Personality Example                     |
+|--------|--------|-----------------------------------------|
+| haiku  | ~0.5s  | Fish_Bob — loose passive, chases draws  |
+| sonnet | ~1.5s  | Shark_Alice — tight aggressive, patient |
+| opus   | ~3s    | GTO_Grace — balanced, exploitative      |
+
+## Getting Started
 
 ### Prerequisites
 
+- [Claude Code](https://claude.ai/code) (CLI, desktop app, or IDE extension)
 - Node.js 18+
 - Python 3.10+
-- A [Poker Now](https://www.pokernow.com) game URL
 
-### Single Bot
+### Setup
 
 ```bash
-# 1. Configure
-cd pokernow-bot
-cp .env.example .env
-# Edit .env with your game URL
-
-# 2. Install dependencies
+cd PokerBot/pokernow-bot
 npm install
+cp .env.example .env
+# Edit .env — set your GAME_URL from pokernow.com
+```
 
-# 3. Start the bridge
+### Play
+
+Open Claude Code in the `PokerBot/` directory and say:
+
+> "来一局poker" / "let's play poker" / "开一桌德州"
+
+Claude Code will:
+- List available bots from `bot_profiles/`
+- Ask which bots you want at the table
+- Launch the game and start making decisions for each bot
+
+You can also say things like:
+- "加一个新bot，性格是喜欢bluff的老头" — Claude creates a new bot personality
+- "让 Shark_Alice 和 Fish_Bob 打一局" — specify exactly who plays
+- "结束游戏" / "stop the game" — shut everything down
+
+### Single Bot (Quick Test)
+
+```bash
+# Start the bridge for one bot
+cd pokernow-bot
 node scripts/bridge-live.js --seat
 
-# 4. Use decide.py to interact
+# Then tell Claude Code to make decisions, or use the CLI:
 python scripts/decide.py                     # show game state
 python scripts/decide.py --act fold          # fold
 python scripts/decide.py --act raise 200     # raise to 200
-python scripts/decide.py --chat "gg wp"      # send chat
-python scripts/decide.py --host start        # start game (host only)
+python scripts/decide.py --chat "gg"         # send chat message
 ```
 
-### Multi-Bot Game
+## Bot Profiles
 
-```bash
-# 1. Write game.json at project root
-cat > game.json << 'EOF'
-{
-  "gameUrl": "https://www.pokernow.com/games/YOUR_GAME_ID",
-  "bots": ["Shark_Alice", "Fish_Bob", "Maniac_Charlie"],
-  "hostBot": "Shark_Alice",
-  "autoSeat": true,
-  "stack": 1000
-}
-EOF
+Each bot lives in `bot_profiles/{name}/personality.md`:
 
-# 2. Launch orchestrator
-cd pokernow-bot
-node scripts/orchestrator.js
+```markdown
+## Identity
+- **Name**: Fish_Bob
+- **Model**: haiku
+- **Use Tools**: no
+
+## Character
+- **Style**: LP (loose passive)
+- **Skill Level**: fish
+- **Chat**: Very talkative. "wow nice hand!"
+
+## Habits
+- Overvalues any pair and any draw
+- Can't fold once he's put chips in
+- Chases gut shots without thinking about odds
 ```
 
-The orchestrator connects all bots, manages turns via `pending-turns.json`, and auto check/folds if no decision arrives within 60 seconds.
+**Model** controls AI capability. **Use Tools** determines whether the bot gets access to equity calculators and GTO strategy docs. A haiku fish with no tools plays badly by nature — no special prompt engineering needed.
 
-## Creating a Bot
+Create a new bot by copying the template:
 
 ```bash
-# Copy the template
 cp -r bot_profiles/.template bot_profiles/YourBot
-
-# Edit personality.md — set model, style, habits
+# Edit bot_profiles/YourBot/personality.md
 ```
 
-Personality fields:
+Or just ask Claude Code: "建一个新bot，TAG风格，用opus模型"
 
-- **Model**: `haiku` / `sonnet` / `opus` — determines AI capability
-- **Use Tools**: `yes` / `no` — whether the bot uses equity calculators
-- **Style**: `TAG` / `LAG` / `LP` / `TP` — tight-aggressive, loose-aggressive, etc.
-- **Habits**: What mistakes this bot makes, how it adjusts, whether it tilts
+## Project Structure
+
+```
+PokerBot/
+  bot_profiles/             Each bot's identity + runtime files
+    .template/              Copy to create new bots
+    Shark_Alice/            Tight-aggressive shark (sonnet)
+    Fish_Bob/               Loose-passive fish (haiku)
+    Maniac_Charlie/         Wild LAG maniac (sonnet)
+    GTO_Grace/              Balanced GTO pro (opus)
+    ARIA_Bot/               Default solid player (sonnet)
+  poker-agent/              Decision support tools
+    tools/                  equity.py, evaluator.py, odds.py, preflop.py
+    strategy/               GTO, preflop, postflop, sizing guides
+  pokernow-bot/             WebSocket engine
+    lib/
+      poker-now.js          WebSocket client (Engine.IO v3 / Socket.IO v2)
+      game-state.js         Game state parser
+    scripts/
+      orchestrator.js       Multi-bot game manager
+      bridge-live.js        Single-bot WebSocket bridge
+      decide.py             CLI interface with action validation
+```
 
 ## Information Isolation
 
-Each bot only sees its own hole cards. Subagents are spawned in separate contexts with no access to other bots' data. Fair play is enforced at the architecture level.
-
-## Poker Tools
-
-The `poker-agent/tools/` module provides:
-
-- **preflop.py** — Opening ranges by position, preflop hand strength
-- **equity.py** — Monte Carlo equity simulation against opponent ranges
-- **odds.py** — Pot odds, implied odds, expected value calculations
-- **evaluator.py** — Hand ranking and evaluation
-
-## Tests
-
-```bash
-python pokernow-bot/scripts/test_decide.py          # all tests
-python pokernow-bot/scripts/test_decide.py --quick   # skip live tests
-```
+Fair play is enforced at the architecture level:
+- Each bot's `turn.json` only contains that bot's own hole cards
+- Subagents are spawned in separate contexts — no access to other bots' data
+- The human player's cards (if coached) never enter any bot's context
 
 ## License
 
