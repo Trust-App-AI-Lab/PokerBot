@@ -1,0 +1,100 @@
+<svg viewBox="0 0 820 520" xmlns="http://www.w3.org/2000/svg" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;">
+  <rect width="820" height="520" fill="#f8f9fb" rx="10"/>
+
+  <!-- Feature 1: Online Play -->
+  <rect x="15" y="15" width="390" height="230" rx="10" fill="#fff" stroke="#e2e8f0" stroke-width="1"/>
+  <rect x="15" y="15" width="4" height="230" rx="2" fill="#dc2626"/>
+  <text x="40" y="42" fill="#1e293b" font-size="13" font-weight="700">🌐 Online Play on PokerNow</text>
+  <rect x="40" y="52" width="82" height="18" rx="9" fill="#fef2f2" stroke="#fecaca" stroke-width="0.5"/>
+  <text x="81" y="64" text-anchor="middle" fill="#dc2626" font-size="8" font-weight="600">AI vs AI</text>
+  <rect x="130" y="52" width="105" height="18" rx="9" fill="#fef2f2" stroke="#fecaca" stroke-width="0.5"/>
+  <text x="182" y="64" text-anchor="middle" fill="#dc2626" font-size="8" font-weight="600">AI + Human</text>
+  <rect x="243" y="52" width="105" height="18" rx="9" fill="#fef2f2" stroke="#fecaca" stroke-width="0.5"/>
+  <text x="295" y="64" text-anchor="middle" fill="#dc2626" font-size="8" font-weight="600">Human + Coach</text>
+
+  <text x="40" y="92" fill="#64748b" font-size="9.5">All games on pokernow.com. Three modes:</text>
+  <text x="40" y="108" fill="#64748b" font-size="9.5">AI vs AI spectating, AI joining human tables,</text>
+  <text x="40" y="124" fill="#64748b" font-size="9.5">or you play with real-time AI coaching.</text>
+
+  <rect x="40" y="140" width="340" height="1" fill="#e2e8f0"/>
+  <text x="40" y="158" fill="#94a3b8" font-size="8" font-weight="600">USAGE</text>
+  <text x="40" y="176" fill="#475569" font-size="9">"来一局poker"</text>
+  <text x="170" y="176" fill="#94a3b8" font-size="9">— Create room, CoachBot auto-ready</text>
+  <text x="40" y="194" fill="#475569" font-size="9">"加入这个房间 &lt;link&gt;"</text>
+  <text x="200" y="194" fill="#94a3b8" font-size="9">— Join existing room</text>
+  <text x="40" y="212" fill="#475569" font-size="9">"加几个bot进来"</text>
+  <text x="170" y="212" fill="#94a3b8" font-size="9">— Add AI anytime (start or mid-game)</text>
+
+  <!-- Feature 2: CoachBot -->
+  <rect x="415" y="15" width="390" height="230" rx="10" fill="#fff" stroke="#e2e8f0" stroke-width="1"/>
+  <rect x="415" y="15" width="4" height="230" rx="2" fill="#0d9488"/>
+  <text x="440" y="42" fill="#1e293b" font-size="13" font-weight="700">🧠 CoachBot — GTO Coach</text>
+  <rect x="440" y="52" width="68" height="18" rx="9" fill="#e6fffa" stroke="#99f6e4" stroke-width="0.5"/>
+  <text x="474" y="64" text-anchor="middle" fill="#0d9488" font-size="8" font-weight="600">Equity</text>
+  <rect x="516" y="52" width="78" height="18" rx="9" fill="#e6fffa" stroke="#99f6e4" stroke-width="0.5"/>
+  <text x="555" y="64" text-anchor="middle" fill="#0d9488" font-size="8" font-weight="600">Pot Odds</text>
+  <rect x="602" y="52" width="68" height="18" rx="9" fill="#e6fffa" stroke="#99f6e4" stroke-width="0.5"/>
+  <text x="636" y="64" text-anchor="middle" fill="#0d9488" font-size="8" font-weight="600">Range</text>
+  <rect x="678" y="52" width="88" height="18" rx="9" fill="#e6fffa" stroke="#99f6e4" stroke-width="0.5"/>
+  <text x="722" y="64" text-anchor="middle" fill="#0d9488" font-size="8" font-weight="600">Auto/Manual</text>
+
+  <text x="440" y="92" fill="#64748b" font-size="9.5">Auto-activated on room entry. Reads your cards</text>
+  <text x="440" y="108" fill="#64748b" font-size="9.5">via browser bridge, runs GTO tools (equity, odds,</text>
+  <text x="440" y="124" fill="#64748b" font-size="9.5">preflop range, evaluator) for quantified advice.</text>
+
+  <rect x="440" y="140" width="340" height="1" fill="#e2e8f0"/>
+  <text x="440" y="158" fill="#94a3b8" font-size="8" font-weight="600">USAGE</text>
+  <text x="440" y="176" fill="#475569" font-size="9">"帮我盯着"</text>
+  <text x="540" y="176" fill="#94a3b8" font-size="9">— Auto-advice every hand</text>
+  <text x="440" y="194" fill="#475569" font-size="9">"这手牌怎么打？"</text>
+  <text x="580" y="194" fill="#94a3b8" font-size="9">— On-demand analysis</text>
+  <text x="440" y="212" fill="#475569" font-size="9">"别给我建议了"</text>
+  <text x="570" y="212" fill="#94a3b8" font-size="9">— Turn off auto-advice</text>
+
+  <!-- Feature 3: PlayBots -->
+  <rect x="15" y="260" width="390" height="245" rx="10" fill="#fff" stroke="#e2e8f0" stroke-width="1"/>
+  <rect x="15" y="260" width="4" height="245" rx="2" fill="#7c3aed"/>
+  <text x="40" y="287" fill="#1e293b" font-size="13" font-weight="700">🎭 PlayBots — AI Opponents</text>
+  <rect x="40" y="297" width="72" height="18" rx="9" fill="#fef2f2" stroke="#fecaca" stroke-width="0.5"/>
+  <text x="76" y="309" text-anchor="middle" fill="#dc2626" font-size="8" font-weight="600">Fish haiku</text>
+  <rect x="120" y="297" width="95" height="18" rx="9" fill="#eff6ff" stroke="#bfdbfe" stroke-width="0.5"/>
+  <text x="167" y="309" text-anchor="middle" fill="#2563eb" font-size="8" font-weight="600">Regular sonnet</text>
+  <rect x="223" y="297" width="82" height="18" rx="9" fill="#eff6ff" stroke="#bfdbfe" stroke-width="0.5"/>
+  <text x="264" y="309" text-anchor="middle" fill="#2563eb" font-size="8" font-weight="600">Shark sonnet</text>
+  <rect x="313" y="297" width="72" height="18" rx="9" fill="#faf5ff" stroke="#ddd6fe" stroke-width="0.5"/>
+  <text x="349" y="309" text-anchor="middle" fill="#7c3aed" font-size="8" font-weight="600">Pro opus</text>
+
+  <text x="40" y="337" fill="#64748b" font-size="9.5">Each bot has a unique personality (style, habits,</text>
+  <text x="40" y="353" fill="#64748b" font-size="9.5">thinking patterns). Different models produce</text>
+  <text x="40" y="369" fill="#64748b" font-size="9.5">different skill levels naturally. Add anytime,</text>
+  <text x="40" y="385" fill="#64748b" font-size="9.5">create new bots with natural language.</text>
+
+  <rect x="40" y="395" width="340" height="1" fill="#e2e8f0"/>
+  <text x="40" y="413" fill="#94a3b8" font-size="8" font-weight="600">USAGE</text>
+  <text x="40" y="431" fill="#475569" font-size="9">"加几个bot进来"</text>
+  <text x="170" y="431" fill="#94a3b8" font-size="9">— Add preset bots</text>
+  <text x="40" y="449" fill="#475569" font-size="9">"加一个喜欢bluff的老头"</text>
+  <text x="220" y="449" fill="#94a3b8" font-size="9">— NL bot creation</text>
+  <text x="40" y="467" fill="#475569" font-size="9">"建一个TAG bot，用opus"</text>
+  <text x="215" y="467" fill="#94a3b8" font-size="9">— Specify style + model</text>
+
+  <!-- Feature 4: One-Command Control -->
+  <rect x="415" y="260" width="390" height="245" rx="10" fill="#fff" stroke="#e2e8f0" stroke-width="1"/>
+  <rect x="415" y="260" width="4" height="245" rx="2" fill="#f59e0b"/>
+  <text x="440" y="287" fill="#1e293b" font-size="13" font-weight="700">💬 One-Command Control</text>
+
+  <text x="440" y="317" fill="#64748b" font-size="9.5">Everything via natural language, Chinese or</text>
+  <text x="440" y="333" fill="#64748b" font-size="9.5">English. No commands to memorize, no manual</text>
+  <text x="440" y="349" fill="#64748b" font-size="9.5">config — just say what you want to do.</text>
+
+  <rect x="440" y="365" width="340" height="1" fill="#e2e8f0"/>
+  <text x="440" y="383" fill="#94a3b8" font-size="8" font-weight="600">USAGE</text>
+  <text x="440" y="401" fill="#475569" font-size="9">"来一局poker"</text>
+  <text x="560" y="401" fill="#94a3b8" font-size="9">— Start game</text>
+  <text x="440" y="419" fill="#475569" font-size="9">"结束游戏"</text>
+  <text x="540" y="419" fill="#94a3b8" font-size="9">— Stop everything</text>
+  <text x="440" y="437" fill="#475569" font-size="9">"加入这个房间 &lt;link&gt;"</text>
+  <text x="610" y="437" fill="#94a3b8" font-size="9">— Join room</text>
+  <text x="440" y="455" fill="#475569" font-size="9">"加一个新bot"</text>
+  <text x="570" y="455" fill="#94a3b8" font-size="9">— Create bot</text>
+</svg>

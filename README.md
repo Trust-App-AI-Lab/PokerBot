@@ -28,33 +28,7 @@ Open Claude Code in `PokerBot/` and say:
 
 ## Features
 
-### 🌐 在线对战平台 — Online Play on PokerNow
-
-`🤖 AI vs AI — 纯AI互打` · `🤖+👤 AI加入真人房间` · `👤+🧠 人类+AI Coaching`
-
-所有对局在 pokernow.com 线上进行，支持三种玩法：AI之间互相对战观赏、AI加入真人牌桌混战、或你亲自上阵并获得AI实时辅助。进入房间即自动激活 CoachBot，随时可用。
-
-### 🧠 CoachBot — GTO 实时教练
-
-`📊 Equity计算` · `📐 Pot Odds` · `🎯 Range分析` · `💡 自动/按需两种模式`
-
-进入房间即自动激活。CoachBot 通过浏览器桥接实时读取你的牌面，调用 GTO 工具（equity、odds、preflop range、hand evaluator）给出量化建议。自动模式每手都分析，按需模式你问才答。
-
-> "帮我盯着" — 开启自动建议 · "这手牌怎么打？" — 按需分析 · "别给我建议了" — 关掉自动 · "这手牌我打得对吗？" — 复盘
-
-### 🎭 多层次 PlayBot — AI 陪玩对手
-
-`Fish 🐟 haiku` · `Regular 🃏 sonnet` · `Shark 🦈 sonnet` · `Pro 👑 opus`
-
-随时可加的AI对手。每个 PlayBot 有独立人格（风格、习惯、思考方式），不同模型天然产生不同水平：haiku 做鱼、sonnet 做常客/鲨鱼、opus 做职业选手。开局或中途均可添加，用自然语言创建新bot。
-
-> "加几个bot进来" — 添加预设bot · "加一个新bot，性格是喜欢bluff的老头" — 自然语言建bot · "建一个TAG风格的bot，用opus模型" — 指定风格+模型
-
-### 💬 一句话操控 — One-Command Control
-
-所有操作都通过自然语言完成，中英文均可。无需记命令、无需手动配置——直接说你想做什么。
-
-> "来一局poker" — 开始游戏 · "结束游戏" — 停止一切 · "加入这个房间 \<link\>" — 加入房间 · "加一个新bot" — 创建bot
+![Features](docs/images/features.svg)
 
 ## Architecture
 
@@ -70,18 +44,9 @@ Open Claude Code in `PokerBot/` and say:
 
 ## Bot Roster
 
-| Bot | Style | Level | Model |
-|-----|-------|-------|-------|
-| CoachBot | Observer-only GTO coach | — | opus |
-| GTO_Grace | Balanced TAG | Pro | opus |
-| Shark_Alice | Ice-cold TAG | Shark | sonnet |
-| ARIA_Bot | Steady TAG | Regular | sonnet |
-| Maniac_Charlie | Reckless LAG | Regular | sonnet |
-| Fish_Bob | Happy-go-lucky LP | Fish | haiku |
+![Bot Roster](docs/images/bot-roster.svg)
 
-Create a new bot with natural language: "建一个TAG风格的bot，用opus模型"
-
-Each bot lives in `bot_profiles/{name}/personality.md` with Identity, Character, Habits, and Workflow sections. Copy from `.template/` to create new bots.
+Create new bots with natural language: "建一个TAG风格的bot，用opus模型". Each bot lives in `bot_profiles/{name}/personality.md`. Copy from `.template/` to create new bots.
 
 ## Dual-Session Architecture
 
@@ -93,19 +58,7 @@ Each bot lives in `bot_profiles/{name}/personality.md` with Identity, Character,
 
 ## How a Hand Plays Out
 
-```
-PokerNow ──► orchestrator: Alice's turn
-               orchestrator: write Alice/turn.json
-BotManager ──► poll → found Alice
-               Agent(sonnet) → raise 200
-               write Alice/action.json
-orchestrator ──► PokerNow: Alice raises 200
-
-PokerNow ──► CoachBot (via bridge → state.json)
-               Flop Td 7h 2c — equity 52%, suggest raise 300
-               User: "好 raise 300"
-CoachBot ──► PokerNow: POST /action → bridge executes
-```
+![How a Hand Plays Out](docs/images/hand-sequence.svg)
 
 ## Information Isolation
 
