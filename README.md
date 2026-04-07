@@ -60,34 +60,37 @@ Open Claude Code in `PokerBot/` and say:
 
 ```mermaid
 flowchart LR
-    subgraph Engine["pokernow-bot · Runtime Engine"]
+    subgraph Engine["pokernow-bot - Runtime Engine"]
         Orch["orchestrator.js"]
         Bridge["coach-bridge.js"]
         Server["coach-server.js"]
         BMS["botmanager.sh"]
     end
 
-    subgraph Brain["poker-agent · GTO Brain"]
-        Strat["strategy/*.md × 5"]
-        Tools["equity.py · odds.py\npreflop.py · evaluator.py"]
+    subgraph Brain["poker-agent - GTO Brain"]
+        Strat["strategy/*.md x 5"]
+        Tools["equity.py / odds.py / preflop.py / evaluator.py"]
     end
 
-    subgraph Bots["bot_profiles · AI Personalities"]
-        CB["CoachBot (opus)"]
-        Grace["GTO_Grace (opus)"]
-        Alice["Shark_Alice (sonnet)"]
-        ARIA["ARIA_Bot (sonnet)"]
-        Charlie["Maniac_Charlie (sonnet)"]
-        Bob["Fish_Bob (haiku)"]
+    subgraph Bots["bot_profiles - AI Personalities"]
+        CB["CoachBot opus"]
+        Grace["GTO_Grace opus"]
+        Alice["Shark_Alice sonnet"]
+        ARIA["ARIA_Bot sonnet"]
+        Charlie["Maniac_Charlie sonnet"]
+        Bob["Fish_Bob haiku"]
     end
 
-    Orch <-->|WebSocket| PN[("pokernow.com")]
+    Orch --- PN["pokernow.com"]
+    Orch -->|WebSocket| PN
     Bridge -.->|inject| PN
     Strat -.->|strategy| Engine
     Tools -.->|tools| Bots
-    Bots -.->|"action.json / turn.json"| Engine
+    Bots -.->|action.json / turn.json| Engine
 
-    CM["CLAUDE.md — Project Brain"] --> Engine & Brain & Bots
+    CM["CLAUDE.md - Project Brain"] --> Engine
+    CM --> Brain
+    CM --> Bots
 ```
 
 ## Three Subsystems
@@ -128,19 +131,19 @@ sequenceDiagram
     participant PN as PokerNow
     participant Orch as orchestrator
     participant BM as BotManager
-    participant CC as CoachBot (You)
+    participant CC as CoachBot
 
-    PN->>Orch: Alice's turn
+    PN->>Orch: Alice turn
     Orch->>Orch: write Alice/turn.json
-    BM->>Orch: poll → found Alice
-    BM->>BM: Agent(sonnet) → {"action":"raise","amount":200}
+    BM->>Orch: poll - found Alice
+    BM->>BM: Agent sonnet - raise 200
     BM->>Orch: write Alice/action.json
     Orch->>PN: Alice raises 200
 
-    PN->>CC: Your turn (via bridge → state.json)
-    CC->>CC: 🃏 Flop: T♦ 7♥ 2♣ — equity 52%, 建议raise $300
-    CC->>CC: User: "好 raise 300"
-    CC->>PN: curl POST /action → bridge executes
+    PN->>CC: Your turn via bridge
+    CC->>CC: Flop Td 7h 2c - equity 52%
+    CC->>CC: User says raise 300
+    CC->>PN: POST /action - bridge executes
 ```
 
 ## Information Isolation
@@ -203,36 +206,38 @@ PokerBot/
 
 ```mermaid
 flowchart TD
-    CM["CLAUDE.md\n(always loaded)"] --> A & B & C
+    CM["CLAUDE.md - always loaded"] --> A
+    CM --> B
+    CM --> C
 
-    subgraph A["A: 纯 Coaching"]
+    subgraph A["A: Coaching"]
         A1["CoachBot/personality.md"]
         A2["poker-agent/SKILL.md"]
-        A3["strategy/*.md × 5"]
+        A3["strategy/*.md x 5"]
     end
 
-    subgraph B["B: 开游戏"]
+    subgraph B["B: Start Game"]
         B1["pokernow-bot/SKILL.md"]
         B2["COACH-BRIDGE.md"]
-        B3["CoachBot/personality.md\n+ poker-agent/SKILL.md\n+ strategy/*.md × 5"]
-        B4["coach-bridge.js 注入"]
+        B3["CoachBot + SKILL.md + strategy x 5"]
+        B4["coach-bridge.js inject"]
     end
 
-    subgraph C["C: 加 PlayBot"]
+    subgraph C["C: Add PlayBot"]
         C1["BOTMANAGER.md"]
-        C2["{bot}/personality.md × N"]
-        C3[".template/personality.md\n(新建时)"]
+        C2["bot personality.md x N"]
+        C3[".template/personality.md"]
     end
 
     C --> D
 
-    subgraph D["D: BotManager (background)"]
+    subgraph D["D: BotManager background"]
         D1["pending-turns.json"]
-        D2["{bot}/personality.md"]
-        D3["{bot}/turn.json"]
-        D4["poker-agent/SKILL.md (Use Tools)"]
-        D5["strategy/*.md (按 Skill Level)"]
-        D6["→ Subagent (all data inlined)"]
+        D2["bot personality.md"]
+        D3["bot turn.json"]
+        D4["poker-agent/SKILL.md"]
+        D5["strategy/*.md by Skill Level"]
+        D6["Subagent - all data inlined"]
     end
 ```
 
