@@ -58,40 +58,7 @@ Open Claude Code in `PokerBot/` and say:
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    subgraph Engine["pokernow-bot - Runtime Engine"]
-        Orch["orchestrator.js"]
-        Bridge["coach-bridge.js"]
-        Server["coach-server.js"]
-        BMS["botmanager.sh"]
-    end
-
-    subgraph Brain["poker-agent - GTO Brain"]
-        Strat["strategy/*.md x 5"]
-        Tools["equity.py / odds.py / preflop.py / evaluator.py"]
-    end
-
-    subgraph Bots["bot_profiles - AI Personalities"]
-        CB["CoachBot opus"]
-        Grace["GTO_Grace opus"]
-        Alice["Shark_Alice sonnet"]
-        ARIA["ARIA_Bot sonnet"]
-        Charlie["Maniac_Charlie sonnet"]
-        Bob["Fish_Bob haiku"]
-    end
-
-    Orch --- PN["pokernow.com"]
-    Orch -->|WebSocket| PN
-    Bridge -.->|inject| PN
-    Strat -.->|strategy| Engine
-    Tools -.->|tools| Bots
-    Bots -.->|action.json / turn.json| Engine
-
-    CM["CLAUDE.md - Project Brain"] --> Engine
-    CM --> Brain
-    CM --> Bots
-```
+![System Architecture](docs/images/architecture.svg)
 
 ## Three Subsystems
 
@@ -126,24 +93,18 @@ Each bot lives in `bot_profiles/{name}/personality.md` with Identity, Character,
 
 ## How a Hand Plays Out
 
-```mermaid
-sequenceDiagram
-    participant PN as PokerNow
-    participant Orch as orchestrator
-    participant BM as BotManager
-    participant CC as CoachBot
+```
+PokerNow ──► orchestrator: Alice's turn
+               orchestrator: write Alice/turn.json
+BotManager ──► poll → found Alice
+               Agent(sonnet) → raise 200
+               write Alice/action.json
+orchestrator ──► PokerNow: Alice raises 200
 
-    PN->>Orch: Alice turn
-    Orch->>Orch: write Alice/turn.json
-    BM->>Orch: poll - found Alice
-    BM->>BM: Agent sonnet - raise 200
-    BM->>Orch: write Alice/action.json
-    Orch->>PN: Alice raises 200
-
-    PN->>CC: Your turn via bridge
-    CC->>CC: Flop Td 7h 2c - equity 52%
-    CC->>CC: User says raise 300
-    CC->>PN: POST /action - bridge executes
+PokerNow ──► CoachBot (via bridge → state.json)
+               Flop Td 7h 2c — equity 52%, suggest raise 300
+               User: "好 raise 300"
+CoachBot ──► PokerNow: POST /action → bridge executes
 ```
 
 ## Information Isolation
@@ -204,42 +165,7 @@ PokerBot/
 
 `CLAUDE.md` is always loaded (session auto-load). It routes to different document sets depending on the scenario:
 
-```mermaid
-flowchart TD
-    CM["CLAUDE.md - always loaded"] --> A
-    CM --> B
-    CM --> C
-
-    subgraph A["A: Coaching"]
-        A1["CoachBot/personality.md"]
-        A2["poker-agent/SKILL.md"]
-        A3["strategy/*.md x 5"]
-    end
-
-    subgraph B["B: Start Game"]
-        B1["pokernow-bot/SKILL.md"]
-        B2["COACH-BRIDGE.md"]
-        B3["CoachBot + SKILL.md + strategy x 5"]
-        B4["coach-bridge.js inject"]
-    end
-
-    subgraph C["C: Add PlayBot"]
-        C1["BOTMANAGER.md"]
-        C2["bot personality.md x N"]
-        C3[".template/personality.md"]
-    end
-
-    C --> D
-
-    subgraph D["D: BotManager background"]
-        D1["pending-turns.json"]
-        D2["bot personality.md"]
-        D3["bot turn.json"]
-        D4["poker-agent/SKILL.md"]
-        D5["strategy/*.md by Skill Level"]
-        D6["Subagent - all data inlined"]
-    end
-```
+![Document Loading Chain](docs/images/loading-chain.svg)
 
 | Scenario | Trigger | Key docs loaded |
 |---|---|---|

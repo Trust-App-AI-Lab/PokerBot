@@ -1,0 +1,115 @@
+<svg viewBox="0 0 860 420" xmlns="http://www.w3.org/2000/svg" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;">
+    <rect width="860" height="420" fill="#f8f9fb" rx="12"/>
+
+    <!-- CLAUDE.md at top -->
+    <rect x="330" y="16" width="200" height="40" rx="8" fill="#1e293b"/>
+    <text x="430" y="41" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">CLAUDE.md</text>
+    <text x="430" y="72" text-anchor="middle" fill="#94a3b8" font-size="10">auto-loaded · routing entry</text>
+
+    <line x1="430" y1="56" x2="430" y2="90" stroke="#cbd5e1" stroke-width="1.5"/>
+    <line x1="110" y1="90" x2="750" y2="90" stroke="#cbd5e1" stroke-width="1.5"/>
+
+    <line x1="110" y1="90" x2="110" y2="110" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="110" cy="110" r="3" fill="#cbd5e1"/>
+    <line x1="320" y1="90" x2="320" y2="110" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="320" cy="110" r="3" fill="#cbd5e1"/>
+    <line x1="540" y1="90" x2="540" y2="110" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="540" cy="110" r="3" fill="#cbd5e1"/>
+    <line x1="750" y1="90" x2="750" y2="110" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="750" cy="110" r="3" fill="#cbd5e1"/>
+
+    <!-- SCENARIO A: Coaching Only -->
+    <rect x="20" y="114" width="180" height="30" rx="6" fill="#0d9488"/>
+    <text x="110" y="134" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">A Coaching</text>
+
+    <rect x="30" y="154" width="160" height="22" rx="4" fill="#faf5ff" stroke="#ddd6fe"/>
+    <text x="110" y="169" text-anchor="middle" fill="#7c3aed" font-size="9">CoachBot/personality.md</text>
+
+    <rect x="30" y="182" width="160" height="22" rx="4" fill="#e6fffa" stroke="#99f6e4"/>
+    <text x="110" y="197" text-anchor="middle" fill="#0d9488" font-size="9">poker-agent/SKILL.md</text>
+
+    <rect x="30" y="210" width="160" height="22" rx="4" fill="#e6fffa" stroke="#99f6e4"/>
+    <text x="110" y="225" text-anchor="middle" fill="#0d9488" font-size="9">strategy/*.md x 5</text>
+
+    <text x="110" y="250" text-anchor="middle" fill="#94a3b8" font-size="8.5">GTO Analysis Flow</text>
+
+    <!-- SCENARIO B: Enter Room -->
+    <rect x="230" y="114" width="180" height="30" rx="6" fill="#dc2626"/>
+    <text x="320" y="134" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">B Start Game</text>
+
+    <rect x="240" y="154" width="160" height="22" rx="4" fill="#fef2f2" stroke="#fecaca"/>
+    <text x="320" y="169" text-anchor="middle" fill="#dc2626" font-size="9">pokernow-bot/SKILL.md</text>
+
+    <rect x="240" y="182" width="160" height="22" rx="4" fill="#fef2f2" stroke="#fecaca"/>
+    <text x="320" y="197" text-anchor="middle" fill="#dc2626" font-size="9">COACH-BRIDGE.md</text>
+
+    <rect x="240" y="210" width="160" height="22" rx="4" fill="#faf5ff" stroke="#ddd6fe"/>
+    <text x="320" y="225" text-anchor="middle" fill="#7c3aed" font-size="9">CoachBot/personality.md</text>
+
+    <rect x="240" y="238" width="160" height="22" rx="4" fill="#e6fffa" stroke="#99f6e4"/>
+    <text x="320" y="253" text-anchor="middle" fill="#0d9488" font-size="9">poker-agent/SKILL.md</text>
+
+    <rect x="240" y="266" width="160" height="22" rx="4" fill="#e6fffa" stroke="#99f6e4"/>
+    <text x="320" y="281" text-anchor="middle" fill="#0d9488" font-size="9">strategy/*.md x 5</text>
+
+    <line x1="320" y1="294" x2="320" y2="306" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3,3"/>
+    <rect x="240" y="306" width="160" height="22" rx="4" fill="#fef2f2" stroke="#fecaca"/>
+    <text x="320" y="321" text-anchor="middle" fill="#dc2626" font-size="9">coach-bridge.js inject</text>
+
+    <text x="320" y="348" text-anchor="middle" fill="#94a3b8" font-size="8.5">CoachBot Ready</text>
+
+    <!-- SCENARIO C: Add PlayBots -->
+    <rect x="450" y="114" width="180" height="30" rx="6" fill="#7c3aed"/>
+    <text x="540" y="134" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">C Add PlayBot</text>
+
+    <rect x="460" y="154" width="160" height="22" rx="4" fill="#fef2f2" stroke="#fecaca"/>
+    <text x="540" y="169" text-anchor="middle" fill="#dc2626" font-size="9">BOTMANAGER.md</text>
+
+    <rect x="460" y="182" width="160" height="22" rx="4" fill="#faf5ff" stroke="#ddd6fe"/>
+    <text x="540" y="197" text-anchor="middle" fill="#7c3aed" font-size="9">bot/personality.md x N</text>
+
+    <rect x="460" y="210" width="160" height="22" rx="4" fill="#faf5ff" stroke="#ddd6fe"/>
+    <text x="540" y="225" text-anchor="middle" fill="#7c3aed" font-size="9">.template/personality.md</text>
+
+    <text x="540" y="253" text-anchor="middle" fill="#94a3b8" font-size="8.5">orchestrator + BotManager</text>
+
+    <!-- SCENARIO D: BotManager Background -->
+    <rect x="660" y="114" width="180" height="30" rx="6" fill="#475569"/>
+    <text x="750" y="134" text-anchor="middle" fill="#fff" font-size="11" font-weight="600">D BotManager</text>
+    <text x="750" y="152" text-anchor="middle" fill="#94a3b8" font-size="8">background claude -p</text>
+
+    <rect x="670" y="162" width="160" height="22" rx="4" fill="#f8fafc" stroke="#e2e8f0"/>
+    <text x="750" y="177" text-anchor="middle" fill="#475569" font-size="9">pending-turns.json</text>
+
+    <rect x="670" y="190" width="160" height="22" rx="4" fill="#faf5ff" stroke="#ddd6fe"/>
+    <text x="750" y="205" text-anchor="middle" fill="#7c3aed" font-size="9">bot/personality.md</text>
+
+    <rect x="670" y="218" width="160" height="22" rx="4" fill="#f8fafc" stroke="#e2e8f0"/>
+    <text x="750" y="233" text-anchor="middle" fill="#475569" font-size="9">bot/turn.json</text>
+
+    <rect x="670" y="246" width="160" height="22" rx="4" fill="#e6fffa" stroke="#99f6e4"/>
+    <text x="750" y="261" text-anchor="middle" fill="#0d9488" font-size="9">poker-agent/SKILL.md</text>
+
+    <rect x="670" y="274" width="160" height="22" rx="4" fill="#e6fffa" stroke="#99f6e4"/>
+    <text x="750" y="289" text-anchor="middle" fill="#0d9488" font-size="9">strategy/*.md</text>
+
+    <line x1="750" y1="302" x2="750" y2="314" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3,3"/>
+    <rect x="680" y="314" width="140" height="22" rx="4" fill="#475569"/>
+    <text x="750" y="329" text-anchor="middle" fill="#fff" font-size="9">Subagent (all inline)</text>
+
+    <text x="750" y="354" text-anchor="middle" fill="#94a3b8" font-size="8.5">action.json</text>
+
+    <!-- Legend -->
+    <g transform="translate(30, 388)">
+      <circle cx="6" cy="6" r="5" fill="#fef2f2" stroke="#dc2626"/>
+      <text x="18" y="10" fill="#94a3b8" font-size="9">pokernow-bot</text>
+      <circle cx="116" cy="6" r="5" fill="#e6fffa" stroke="#0d9488"/>
+      <text x="128" y="10" fill="#94a3b8" font-size="9">poker-agent</text>
+      <circle cx="216" cy="6" r="5" fill="#faf5ff" stroke="#7c3aed"/>
+      <text x="228" y="10" fill="#94a3b8" font-size="9">bot_profiles</text>
+      <circle cx="316" cy="6" r="5" fill="#f8fafc" stroke="#e2e8f0"/>
+      <text x="328" y="10" fill="#94a3b8" font-size="9">runtime (ephemeral)</text>
+      <rect x="446" y="1" width="40" height="10" rx="3" fill="#1e293b"/>
+      <text x="492" y="10" fill="#94a3b8" font-size="9">always loaded</text>
+    </g>
+</svg>
