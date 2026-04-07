@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Poker Now Bot — Runtime Engine</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #f8f9fb; color: #334155; line-height: 1.6; }
+
+  .hero { text-align: center; padding: 48px 24px 20px; }
+  .hero h1 { font-size: 2.2rem; color: #1e293b; font-weight: 700; }
+  .hero h1 span { color: #dc2626; }
+  .hero p { color: #64748b; font-size: 1.05rem; margin-top: 8px; max-width: 650px; margin-left: auto; margin-right: auto; }
+
+  .svg-wrap { display: flex; justify-content: center; padding: 16px 24px 40px; overflow-x: auto; }
+  svg.arch { max-width: 960px; width: 100%; height: auto; }
+  svg.arch text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+
+  .section { max-width: 960px; margin: 0 auto; padding: 0 24px 48px; }
+  .section-title { font-size: 1.4rem; color: #1e293b; margin-bottom: 20px; padding-left: 12px; border-left: 3px solid #dc2626; }
+
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; transition: border-color 0.2s, box-shadow 0.2s; }
+  .card:hover { border-color: #dc2626; box-shadow: 0 2px 12px rgba(220,38,38,0.06); }
+  .tag { display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; padding: 3px 8px; border-radius: 4px; margin-bottom: 10px; }
+  .tag-script { background: #fef2f2; color: #dc2626; }
+  .tag-lib { background: #eff6ff; color: #2563eb; }
+  .tag-doc { background: #f0fdf4; color: #16a34a; }
+  .tag-ipc { background: #fefce8; color: #ca8a04; }
+  .card h3 { font-size: 1.05rem; color: #1e293b; margin-bottom: 6px; }
+  .card .desc { font-size: 0.88rem; color: #64748b; margin-bottom: 10px; }
+  .card .meta { font-size: 0.78rem; color: #94a3b8; }
+
+  /* Flow steps */
+  .flow { max-width: 960px; margin: 0 auto; padding: 0 24px 48px; }
+  .flow-step { display: flex; gap: 16px; margin-bottom: 12px; }
+  .flow-num { flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; background: #dc2626; color: #fff; font-weight: 700; font-size: 0.9rem; display: flex; align-items: center; justify-content: center; }
+  .flow-content { flex: 1; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 18px; }
+  .flow-content h4 { font-size: 0.95rem; color: #1e293b; margin-bottom: 4px; }
+  .flow-content p { font-size: 0.85rem; color: #64748b; }
+  .flow-arrow { display: flex; justify-content: center; color: #cbd5e1; margin: -4px 0 -4px 10px; font-size: 1.1rem; }
+
+  table.files { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+  table.files th, table.files td { padding: 10px 14px; text-align: left; border: 1px solid #e2e8f0; }
+  table.files th { background: #f8fafc; color: #64748b; font-weight: 600; }
+  table.files td { color: #334155; }
+  table.files code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.82rem; color: #dc2626; }
+
+  .footer { text-align: center; padding: 32px 24px; color: #94a3b8; font-size: 0.78rem; border-top: 1px solid #e2e8f0; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Poker Now Bot <span>Runtime Engine</span></h1>
+  <p>WebSocket engine, dual-session architecture, browser bridge — everything that connects AI bots to pokernow.com</p>
+</div>
+
+<!-- Architecture Diagram -->
+<div class="svg-wrap">
+<svg class="arch" viewBox="0 0 960 540" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="sh">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#94a3b8" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <rect width="960" height="540" fill="#f8f9fb"/>
+  <pattern id="g2" width="40" height="40" patternUnits="userSpaceOnUse">
+    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#eef1f5" stroke-width="0.5"/>
+  </pattern>
+  <rect width="960" height="540" fill="url(#g2)"/>
+
+  <!-- ===== MAIN SESSION (left) ===== -->
+  <rect x="40" y="30" width="420" height="240" rx="14" fill="#fff" stroke="#dc2626" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="60" y="55" fill="#dc2626" font-size="13" font-weight="700">MAIN SESSION (CC ↔ User)</text>
+  <text x="60" y="73" fill="#94a3b8" font-size="10">= CoachBot · Always responsive</text>
+
+  <!-- CoachBot internals -->
+  <rect x="60" y="90" width="170" height="50" rx="8" fill="#fef2f2" stroke="#fca5a5" stroke-width="1"/>
+  <text x="145" y="112" text-anchor="middle" fill="#dc2626" font-size="11" font-weight="600">CoachBot</text>
+  <text x="145" y="128" text-anchor="middle" fill="#94a3b8" font-size="9">GTO coaching · User interaction</text>
+
+  <rect x="250" y="90" width="190" height="50" rx="8" fill="#f0fdf4" stroke="#86efac" stroke-width="1"/>
+  <text x="345" y="112" text-anchor="middle" fill="#16a34a" font-size="11" font-weight="600">Game Management</text>
+  <text x="345" y="128" text-anchor="middle" fill="#94a3b8" font-size="9">Start/stop · Config · Approve bots</text>
+
+  <!-- State reading -->
+  <rect x="60" y="155" width="170" height="40" rx="6" fill="#fff" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="145" y="177" text-anchor="middle" fill="#475569" font-size="10">Read state.json</text>
+  <text x="145" y="190" text-anchor="middle" fill="#94a3b8" font-size="8.5">Instant · Preprocessed</text>
+
+  <!-- Action sending -->
+  <rect x="250" y="155" width="190" height="40" rx="6" fill="#fff" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="345" y="177" text-anchor="middle" fill="#475569" font-size="10">curl POST /action</text>
+  <text x="345" y="190" text-anchor="middle" fill="#94a3b8" font-size="8.5">HTTP → bridge executes via DOM</text>
+
+  <!-- Coach bridge + server -->
+  <rect x="60" y="210" width="380" height="45" rx="6" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+  <text x="250" y="233" text-anchor="middle" fill="#2563eb" font-size="11" font-weight="600">coach-bridge.js → coach-server.js (:3456) → state.json</text>
+  <text x="250" y="247" text-anchor="middle" fill="#94a3b8" font-size="9">Browser-injected · Hooks page WebSocket · Push/poll</text>
+
+  <!-- ===== BOTMANAGER (right) ===== -->
+  <rect x="500" y="30" width="420" height="240" rx="14" fill="#fff" stroke="#2563eb" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="520" y="55" fill="#2563eb" font-size="13" font-weight="700">BOTMANAGER (Background)</text>
+  <text x="520" y="73" fill="#94a3b8" font-size="10">botmanager.sh + claude -p · Autonomous</text>
+
+  <!-- Bash loop -->
+  <rect x="520" y="90" width="160" height="50" rx="8" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+  <text x="600" y="112" text-anchor="middle" fill="#2563eb" font-size="11" font-weight="600">botmanager.sh</text>
+  <text x="600" y="128" text-anchor="middle" fill="#94a3b8" font-size="9">Poll pending-turns.json (2s)</text>
+
+  <!-- Claude -p -->
+  <rect x="700" y="90" width="200" height="50" rx="8" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+  <text x="800" y="112" text-anchor="middle" fill="#2563eb" font-size="11" font-weight="600">claude -p (per batch)</text>
+  <text x="800" y="128" text-anchor="middle" fill="#94a3b8" font-size="9">Stateless · Fresh each time</text>
+
+  <!-- Subagents -->
+  <rect x="520" y="155" width="110" height="40" rx="6" fill="#fefce8" stroke="#fde68a" stroke-width="1"/>
+  <text x="575" y="175" text-anchor="middle" fill="#a16207" font-size="9.5" font-weight="600">Agent(haiku)</text>
+  <text x="575" y="188" text-anchor="middle" fill="#94a3b8" font-size="8">Fish_Bob</text>
+
+  <rect x="645" y="155" width="110" height="40" rx="6" fill="#fefce8" stroke="#fde68a" stroke-width="1"/>
+  <text x="700" y="175" text-anchor="middle" fill="#a16207" font-size="9.5" font-weight="600">Agent(sonnet)</text>
+  <text x="700" y="188" text-anchor="middle" fill="#94a3b8" font-size="8">Shark_Alice</text>
+
+  <rect x="770" y="155" width="130" height="40" rx="6" fill="#fefce8" stroke="#fde68a" stroke-width="1"/>
+  <text x="835" y="175" text-anchor="middle" fill="#a16207" font-size="9.5" font-weight="600">Agent(opus)</text>
+  <text x="835" y="188" text-anchor="middle" fill="#94a3b8" font-size="8">GTO_Grace</text>
+
+  <text x="710" y="212" text-anchor="middle" fill="#94a3b8" font-size="9">↑ Parallel subagents · Write action.json each ↑</text>
+
+  <!-- Orchestrator + action.json -->
+  <rect x="520" y="225" width="380" height="30" rx="6" fill="#fff" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="710" y="245" text-anchor="middle" fill="#475569" font-size="10">action.json per bot → orchestrator.js reads → WebSocket execute</text>
+
+  <!-- ===== ORCHESTRATOR (bottom center) ===== -->
+  <rect x="250" y="310" width="460" height="80" rx="12" fill="#fff" stroke="#f59e0b" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="480" y="337" text-anchor="middle" fill="#d97706" font-size="14" font-weight="700">orchestrator.js</text>
+  <text x="480" y="355" text-anchor="middle" fill="#64748b" font-size="10.5">Multi-bot WebSocket manager · Connects all bots · Routes turns</text>
+  <text x="480" y="372" text-anchor="middle" fill="#94a3b8" font-size="9.5">Writes pending-turns.json + turn.json · Reads action.json · Auto check/fold 60s timeout</text>
+
+  <!-- ===== POKERNOW (bottom) ===== -->
+  <rect x="300" y="430" width="360" height="55" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1" filter="url(#sh)"/>
+  <text x="480" y="455" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">pokernow.com</text>
+  <text x="480" y="472" text-anchor="middle" fill="#94a3b8" font-size="10">Game server · WebSocket protocol</text>
+
+  <!-- ===== CONNECTIONS ===== -->
+  <!-- Main session ↔ filesystem ↔ BotManager -->
+  <line x1="460" y1="150" x2="500" y2="150" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="480" y="143" text-anchor="middle" fill="#94a3b8" font-size="8">filesystem IPC</text>
+
+  <!-- Main session → orchestrator -->
+  <path d="M250,270 L250,310" stroke="#dc2626" stroke-width="1.5" fill="none"/>
+  <circle cx="250" cy="310" r="3" fill="#dc2626"/>
+  <text x="220" y="295" fill="#dc2626" font-size="8">launch</text>
+
+  <!-- BotManager → orchestrator -->
+  <path d="M710,270 L710,310" stroke="#2563eb" stroke-width="1.5" fill="none"/>
+  <circle cx="710" cy="310" r="3" fill="#2563eb"/>
+  <text x="730" y="295" fill="#2563eb" font-size="8">action.json</text>
+
+  <!-- Orchestrator → PokerNow (bots) -->
+  <path d="M480,390 L480,430" stroke="#f59e0b" stroke-width="2" fill="none"/>
+  <circle cx="480" cy="430" r="4" fill="#f59e0b"/>
+  <text x="510" y="415" fill="#d97706" font-size="9">WebSocket (bots)</text>
+
+  <!-- Coach bridge → PokerNow -->
+  <path d="M150,270 L150,455 L300,455" stroke="#dc2626" stroke-width="1.5" fill="none" stroke-dasharray="5,3"/>
+  <circle cx="300" cy="455" r="3" fill="#dc2626"/>
+  <text x="110" y="370" fill="#dc2626" font-size="8" transform="rotate(-90,110,370)">Browser bridge (hooks page WS)</text>
+
+  <!-- game.json signal -->
+  <rect x="40" y="310" width="180" height="36" rx="6" fill="#fef2f2" stroke="#fca5a5" stroke-width="1"/>
+  <text x="130" y="330" text-anchor="middle" fill="#dc2626" font-size="10" font-weight="600">game.json</text>
+  <text x="130" y="342" text-anchor="middle" fill="#94a3b8" font-size="8">Delete = stop all</text>
+
+  <!-- Legend -->
+  <g transform="translate(40, 500)">
+    <text x="0" y="0" fill="#94a3b8" font-size="10" font-weight="600">DATA FLOW</text>
+    <line x1="0" y1="16" x2="30" y2="16" stroke="#dc2626" stroke-width="1.5"/>
+    <text x="36" y="20" fill="#94a3b8" font-size="9">Main session (CoachBot)</text>
+    <line x1="170" y1="16" x2="200" y2="16" stroke="#2563eb" stroke-width="1.5"/>
+    <text x="206" y="20" fill="#94a3b8" font-size="9">BotManager</text>
+    <line x1="300" y1="16" x2="330" y2="16" stroke="#f59e0b" stroke-width="2"/>
+    <text x="336" y="20" fill="#94a3b8" font-size="9">Orchestrator ↔ PokerNow</text>
+    <line x1="510" y1="16" x2="540" y2="16" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <text x="546" y="20" fill="#94a3b8" font-size="9">Filesystem IPC</text>
+  </g>
+</svg>
+</div>
+
+<!-- Game Setup Flow -->
+<div class="flow">
+  <h2 class="section-title">Game Setup Flow</h2>
+
+  <div class="flow-step">
+    <div class="flow-num">0</div>
+    <div class="flow-content">
+      <h4>Get Game Room</h4>
+      <p><b>Path A</b>: User creates room on pokernow.com → CC detects URL.<br/>
+         <b>Path B</b>: User pastes existing room link → CC extracts gameId.</p>
+    </div>
+  </div>
+  <div class="flow-arrow">↓</div>
+
+  <div class="flow-step">
+    <div class="flow-num">1</div>
+    <div class="flow-content">
+      <h4>Select Bots</h4>
+      <p>CC scans bot_profiles/, lists available bots. User picks which to join + whether to enable CoachBot.</p>
+    </div>
+  </div>
+  <div class="flow-arrow">↓</div>
+
+  <div class="flow-step">
+    <div class="flow-num">2</div>
+    <div class="flow-content">
+      <h4>Write game.json + Launch</h4>
+      <p>CC writes game config (gameUrl, bots[], coach, stack). Launches <code>orchestrator.js</code> (bots connect via WebSocket).</p>
+    </div>
+  </div>
+  <div class="flow-arrow">↓</div>
+
+  <div class="flow-step">
+    <div class="flow-num">3</div>
+    <div class="flow-content">
+      <h4>Approve Bots + Inject Bridge</h4>
+      <p>CC approves bot join requests via hostAction(). Injects coach-bridge.js into browser tab (one time). Starts coach-server.js.</p>
+    </div>
+  </div>
+  <div class="flow-arrow">↓</div>
+
+  <div class="flow-step">
+    <div class="flow-num">4</div>
+    <div class="flow-content">
+      <h4>Dual-Session Game Loop</h4>
+      <p>CC launches <code>botmanager.sh &</code> in background. Main session stays free for user chat + CoachBot coaching. BotManager handles all bot decisions autonomously.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Scripts -->
+<div class="section">
+  <h2 class="section-title">Scripts</h2>
+  <div class="card-grid">
+    <div class="card">
+      <div class="tag tag-script">Core</div>
+      <h3>orchestrator.js</h3>
+      <div class="desc">Multi-bot WebSocket manager. Reads game.json, connects all bots (3s apart), watches for turns, writes pending-turns.json + per-bot turn.json, reads action.json, executes via WebSocket. Auto check/fold after 60s timeout.</div>
+      <div class="meta">655 lines</div>
+    </div>
+    <div class="card">
+      <div class="tag tag-script">Core</div>
+      <h3>coach-bridge.js</h3>
+      <div class="desc">Browser-injected CoachBot bridge. Hooks page WebSocket, exposes window.__coach API (getState, act, hostAction, fetchLog). Pushes state to coach-server, polls /action for commands. Injected once via javascript_tool at game start.</div>
+      <div class="meta">838 lines · minified version: coach-bridge.min.js</div>
+    </div>
+    <div class="card">
+      <div class="tag tag-script">Core</div>
+      <h3>coach-server.js</h3>
+      <div class="desc">HTTP server (localhost:3456) bridging CC and browser. Receives state pushes from bridge → preprocesses → writes state.json. Routes action POST from CC → bridge polls and executes. Endpoints: /state, /action, /event, /turn, /health.</div>
+      <div class="meta">360 lines · Auto-kills old instance via PID file</div>
+    </div>
+    <div class="card">
+      <div class="tag tag-script">Background</div>
+      <h3>botmanager.sh</h3>
+      <div class="desc">Bash outer loop for BotManager. Polls pending-turns.json every 2s. When turns found, invokes <code>claude -p</code> with botmanager-prompt.md. Exits when game.json is deleted.</div>
+      <div class="meta">83 lines · Spawns stateless CC sessions</div>
+    </div>
+    <div class="card">
+      <div class="tag tag-script">Utility</div>
+      <h3>decide.py</h3>
+      <div class="desc">CLI interface with action validation. Validates action JSON format, checks against valid actions for current game state. Used for testing and manual action injection.</div>
+      <div class="meta">600 lines · test_decide.py (214 lines)</div>
+    </div>
+    <div class="card">
+      <div class="tag tag-script">Legacy</div>
+      <h3>bridge-live.js</h3>
+      <div class="desc">Single-bot WebSocket bridge. Original implementation before multi-bot orchestrator. Still functional for single-bot games.</div>
+      <div class="meta">697 lines</div>
+    </div>
+  </div>
+</div>
+
+<!-- Libraries -->
+<div class="section">
+  <h2 class="section-title">Libraries</h2>
+  <div class="card-grid">
+    <div class="card">
+      <div class="tag tag-lib">Internal</div>
+      <h3>lib/poker-now.js</h3>
+      <div class="desc">WebSocket client for PokerNow protocol. Handles connection, authentication, message parsing, action encoding. Multi-session capable — orchestrator creates one instance per bot.</div>
+      <div class="meta">554 lines</div>
+    </div>
+    <div class="card">
+      <div class="tag tag-lib">Internal</div>
+      <h3>lib/game-state.js</h3>
+      <div class="desc">Game state parser. Converts raw PokerNow WebSocket messages into structured game state: players, cards, pot, actions, phase. Used by orchestrator to build turn.json.</div>
+      <div class="meta">666 lines</div>
+    </div>
+  </div>
+</div>
+
+<!-- Communication Files -->
+<div class="section">
+  <h2 class="section-title">Communication Files (IPC)</h2>
+  <table class="files">
+    <thead>
+      <tr><th>File</th><th>Writer</th><th>Reader</th><th>Purpose</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>game.json</code></td>
+        <td>Main session (CC)</td>
+        <td>Orchestrator, BotManager</td>
+        <td>Game config. <b>Delete = stop game</b> (both detect and exit)</td>
+      </tr>
+      <tr>
+        <td><code>pending-turns.json</code></td>
+        <td>Orchestrator</td>
+        <td>BotManager</td>
+        <td>List of bots with pending turns + count</td>
+      </tr>
+      <tr>
+        <td><code>bot_profiles/{name}/turn.json</code></td>
+        <td>Orchestrator</td>
+        <td>BotManager → subagent</td>
+        <td>Current game state for this bot (ephemeral)</td>
+      </tr>
+      <tr>
+        <td><code>bot_profiles/{name}/action.json</code></td>
+        <td>BotManager (bots) / CC (CoachBot)</td>
+        <td>Orchestrator</td>
+        <td>Bot's decision: {"action": "raise", "amount": 200}</td>
+      </tr>
+      <tr>
+        <td><code>bot_profiles/CoachBot/state.json</code></td>
+        <td>coach-server.js</td>
+        <td>Main session (CC)</td>
+        <td>Preprocessed game state for coaching</td>
+      </tr>
+      <tr>
+        <td><code>bot_profiles/CoachBot/history.jsonl</code></td>
+        <td>coach-server.js</td>
+        <td>Main session (CC)</td>
+        <td>Append-only hand history for review</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Documentation -->
+<div class="section">
+  <h2 class="section-title">Documentation</h2>
+  <div class="card-grid">
+    <div class="card">
+      <div class="tag tag-doc">Entry Point</div>
+      <h3>SKILL.md</h3>
+      <div class="desc">Multi-bot game flow reference. Step-by-step: how to create/join rooms, select bots, write game.json, launch orchestrator + BotManager, stop games. Read this first.</div>
+    </div>
+    <div class="card">
+      <div class="tag tag-doc">Reference</div>
+      <h3>COACH-BRIDGE.md</h3>
+      <div class="desc">Coach bridge connection reference. Bridge injection, coach-server endpoints, __coach API, state reading via Read tool, action execution via curl, autoAdvice toggle, setup flow.</div>
+    </div>
+    <div class="card">
+      <div class="tag tag-doc">Reference</div>
+      <h3>BOTMANAGER.md</h3>
+      <div class="desc">BotManager architecture. Bash loop + claude -p design, prompt template, subagent construction, information isolation (3 layers), model assignment, JSON extraction.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Information Isolation -->
+<div class="section">
+  <h2 class="section-title">Information Isolation (3 Layers)</h2>
+  <div class="card-grid">
+    <div class="card">
+      <h3>Layer 1: Data (Orchestrator)</h3>
+      <div class="desc">Each bot's turn.json only contains that bot's own hole cards. No cross-bot data leakage at the WebSocket level.</div>
+    </div>
+    <div class="card">
+      <h3>Layer 2: Prompt (BotManager)</h3>
+      <div class="desc">Subagent prompts contain NO file paths, NO directory names, NO other bot names. All data inlined as plain text. Zero filesystem knowledge.</div>
+    </div>
+    <div class="card">
+      <h3>Layer 3: Session (Dual-session)</h3>
+      <div class="desc">CoachBot (main session) sees user's cards via bridge. Bot decisions run in separate claude -p sessions. User's cards never enter any bot's prompt.</div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  pokernow-bot · 8 scripts (4,171 lines) + 2 libs (1,220 lines) · 3 docs (SKILL.md, COACH-BRIDGE.md, BOTMANAGER.md) · Updated 2026-04-07
+</div>
+
+</body>
+</html>

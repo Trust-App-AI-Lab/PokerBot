@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 GTO Pre-flop hand analysis for 6-max cash games (100BB).
 

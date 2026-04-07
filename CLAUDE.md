@@ -2,43 +2,108 @@
 
 Multi-agent poker system — AI bots play Texas Hold'em on Poker Now (pokernow.com) via WebSocket, with Claude Code as the orchestration layer.
 
+## Architecture Overview
+
+Dual-session design for non-blocking gameplay:
+
+```
+Main Session (CC ↔ User) = CoachBot    BotManager (background process)
+  - Free conversation anytime             - botmanager.sh polls pending-turns.json
+  - Reads state: Read state.json          - claude -p handles each batch
+    (pushed by bridge → server)           - Spawns subagents per bot (parallel)
+  - GTO coaching with tools               - Writes action.json per bot
+  - Executes actions: curl POST /action   - Exits when game.json deleted
+  - Game management (start/stop/config)
+          ↕ filesystem + HTTP IPC ↕
+  coach-bridge.js ──push──▶ coach-server.js (:3456) ──▶ state.json
+                  ◀─poll──           ◀─curl── CC
+                  /action            POST /action
+        orchestrator.js (WebSocket — bots only)
+```
+
 ## Key Skills
 
-- `pokernow-bot/SKILL.md` — Multi-bot game flow: how to launch, manage turns, create bots, stop games. **Read this first when the user wants to play poker.**
-- `poker-agent/SKILL.md` — GTO strategy tools (equity, evaluator, preflop, odds). Included in subagent prompts when a bot has `Use Tools: yes`.
+- `pokernow-bot/SKILL.md` — Game flow: Enter Room (auto CoachBot), Add Play Bots (anytime), Stop Game. **Read this first when the user wants to play poker.**
+- `pokernow-bot/COACH-BRIDGE.md` — Coach bridge connection & API: bridge injection, coach-server endpoints, `__coach` API, setup flow.
+- `bot_profiles/CoachBot/personality.md` — CoachBot coaching logic: **GTO Analysis Flow (mandatory)**, range estimation, decision template, coaching style. **Read this when coaching the user.**
+- `poker-agent/SKILL.md` — GTO tool manual: each tool's usage, output format, and how to interpret results. **CoachBot MUST load this at session start.**
+- `poker-agent/strategy/` — Preflop/postflop/sizing/GTO/range knowledge base. **CoachBot loads all 5 files at session start (see CoachBot Activation below).**
+- `pokernow-bot/BOTMANAGER.md` — BotManager background process: `botmanager.sh` + `claude -p` architecture, prompt template, information isolation rules.
 
 ## Project Layout
 
-- `bot_profiles/{name}/personality.md` — Bot identity, model, style, habits (persistent)
+- `bot_profiles/{name}/personality.md` — Bot identity, model, style, habits, **decision workflow** (persistent)
 - `bot_profiles/{name}/turn.json` — Current game state when it's this bot's turn (ephemeral)
-- `bot_profiles/{name}/action.json` — CC writes bot's decision here (ephemeral)
-- `pokernow-bot/scripts/orchestrator.js` — Multi-bot WebSocket manager
-- `pokernow-bot/scripts/bridge-live.js` — Single-bot WebSocket bridge
+- `bot_profiles/{name}/action.json` — Bot's decision: written by BotManager (play bots) or CC (CoachBot) (ephemeral)
+- `bot_profiles/CoachBot/personality.md` — Observer-only GTO coach (reads user's game via browser bridge, never acts autonomously)
+- `pokernow-bot/scripts/orchestrator.js` — Multi-bot WebSocket manager (bots only, CoachBot not included)
+- `pokernow-bot/scripts/coach-bridge.js` — Browser-injected CoachBot bridge (hooks page WebSocket, exposes `__coach` API)
+- `pokernow-bot/scripts/bridge-live.js` — Single-bot WebSocket bridge (legacy)
 - `pokernow-bot/scripts/decide.py` — CLI interface with action validation
 - `poker-agent/tools/` — Python calculation tools (equity, odds, hand eval, preflop ranges)
 
 ## Critical Rules
 
+### Dual-Session Architecture
+Main session (= CoachBot) handles user interaction and coaching. BotManager runs as a background process (`botmanager.sh` + `claude -p`) and handles all play bot decisions autonomously. They communicate via shared JSON files. Never try to run bot decisions in the main session — it blocks user conversation.
+
+### CoachBot = HTTP-Based (No javascript_tool in game loop)
+CoachBot injects `coach-bridge.js` into PokerNow tab via `javascript_tool` **once at game start**. After that:
+- **Read state**: `Read("bot_profiles/CoachBot/state.json")` — instant, preprocessed by coach-server
+- **Send action**: `curl -s -X POST localhost:3456/action -H "Content-Type: application/json" -d '{"action":"call"}'`
+- **Check result**: `curl -s localhost:3456/action-result`
+- **Start server**: `node pokernow-bot/scripts/coach-server.js "gameUrl"` (auto-kills old instance)
+- **No javascript_tool needed during gameplay** — all communication via HTTP + filesystem
+
+### CoachBot Activation (MANDATORY)
+When user mentions ANYTHING poker-coaching related, you ARE CoachBot. Before responding, you MUST load `bot_profiles/CoachBot/personality.md` (if not already loaded this session). Then follow its GTO Analysis Flow.
+
+**Trigger keywords** (non-exhaustive — any poker advice/play intent counts):
+- 中文: 怎么打, 该不该call, 该不该raise, 该fold吗, 帮我看看, 帮我分析, 教我打牌, 教我, 来coaching, 这手牌, 分析一下, 打得对吗, 有没有更好的打法, 我打得怎么样, EV多少, 胜率多少, 什么range, 帮我盯着, 替我做决定, GTO怎么说
+- English: how to play, should I call/raise/fold, coach me, analyze this hand, what's the EV, what range, is this a good play, help me decide, what would GTO do, review my hand
+
+**First activation each session** → load strategy knowledge (authoritative list):
+```python
+Read("bot_profiles/CoachBot/personality.md")
+Read("poker-agent/SKILL.md")
+Read("poker-agent/strategy/preflop.md")
+Read("poker-agent/strategy/postflop.md")
+Read("poker-agent/strategy/sizing.md")
+Read("poker-agent/strategy/gto-fundamentals.md")
+Read("poker-agent/strategy/range.md")
+```
+
+**Already loaded** → go straight to GTO Analysis Flow in personality.md.
+
+### GTO Tools Are MANDATORY for Coaching
+When user asks for poker advice, ALWAYS run the GTO tools before answering. Never give intuition-only advice. See `bot_profiles/CoachBot/personality.md` → "GTO Analysis Flow" for the full mandatory workflow.
+
 ### File-Based IPC
-The bridge/orchestrator and CC communicate through JSON files, not stdin/stdout. Never try to pipe commands to the Node process.
+The orchestrator and BotManager communicate through JSON files, not stdin/stdout. Never try to pipe commands to the Node process.
 
 ### Don't Kill Processes Manually
 `bridge-live.js` and `orchestrator.js` auto-kill old instances via PID file on startup. Just start a new instance — don't `taskkill` or `kill` manually.
 
 ### Information Isolation
-Each bot only sees its own hole cards. When spawning subagents for different bots, never leak one bot's cards into another bot's context.
+BotManager must inline all game data into subagent prompts as plain text. Subagent prompts must contain NO file paths, NO directory names, NO other bot names. Subagents should have zero knowledge of the project filesystem. CoachBot sees user's cards (via browser bridge) but this never enters any bot's prompt. Future option: per-bot AES encryption on turn.json/state.json/history.jsonl if prompt isolation proves insufficient.
 
 ### Action Format
 Actions are JSON objects: `{"action": "fold"}`, `{"action": "raise", "amount": 200}`, `{"action": "chat", "message": "gg"}`. Use `decide.py` for validation or validate against the rules in `pokernow-bot/SKILL.md`.
 
 ### Turn Timeout
-Orchestrator auto check/folds after 60 seconds if no `action.json` is written. Don't spend too long reasoning.
+Orchestrator auto check/folds after 60 seconds if no `action.json` is written. Don't spend too long reasoning. (CoachBot is not in orchestrator — no timeout applies.)
+
+### Game End Signal
+Deleting `game.json` signals the BotManager to exit. Always delete game.json when stopping a game — orchestrator and BotManager both detect deletion and exit.
 
 ## Common User Requests
 
 | User says | What to do |
 |-----------|------------|
-| "来一局poker" / "play poker" | Read `pokernow-bot/SKILL.md`, follow multi-bot game flow |
-| "建一个新bot" / "create a bot" | Create `bot_profiles/{name}/personality.md` from `.template/` |
-| "结束游戏" / "stop game" | Kill orchestrator via PID file, confirm to user |
-| "教我打牌" / "coach me" | Read `poker-agent/SKILL.md`, enter coach mode |
+| "来一局poker" / "play poker" | Read `pokernow-bot/SKILL.md` → Enter Room (auto CoachBot) → ask if add bots |
+| "加入 <pokernow link>" / "join this game" | Read `pokernow-bot/SKILL.md` → Enter Room Path B (auto CoachBot) → ask if add bots |
+| "加几个bot" / "add bots" (mid-game) | Read `pokernow-bot/SKILL.md` → Add Play Bots flow (orchestrator + BotManager) |
+| "建一个新bot" / "create a bot" | Read `.template/personality.md` → create `bot_profiles/{name}/personality.md` → if mid-game, follow Add Play Bots in `pokernow-bot/SKILL.md` to join |
+| "结束游戏" / "stop game" | Delete game.json + stop coach-server → everything auto-exits → confirm |
+| "别给我建议了" | Toggle off auto-advice; only analyze when user asks |
+| Any poker advice keyword (see trigger list) | Activate CoachBot if not already loaded, run GTO Analysis Flow |

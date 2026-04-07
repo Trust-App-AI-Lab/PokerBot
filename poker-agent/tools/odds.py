@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Pot odds, implied odds, and EV calculator.
 

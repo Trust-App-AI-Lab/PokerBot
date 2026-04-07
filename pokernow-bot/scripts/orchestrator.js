@@ -60,7 +60,8 @@ const log = {
 
 // ── File helpers ─────────────────────────────────
 function writeJSON(filepath, data) {
-  try { fs.writeFileSync(filepath, JSON.stringify(data, null, 2)); } catch {}
+  try { fs.writeFileSync(filepath, JSON.stringify(data, null, 2)); }
+  catch (e) { log.error(`writeJSON failed: ${filepath} — ${e.message}`); }
 }
 function readJSON(filepath) {
   try {
@@ -68,7 +69,7 @@ function readJSON(filepath) {
       const raw = fs.readFileSync(filepath, 'utf-8').trim();
       if (raw) return JSON.parse(raw);
     }
-  } catch {}
+  } catch (e) { log.error(`readJSON failed: ${filepath} — ${e.message}`); }
   return null;
 }
 function deleteFile(filepath) {
@@ -112,13 +113,22 @@ function addPendingTurn(botName, botInstance) {
   }
 
   const since = Date.now();
+  // Flag to prevent timeout firing after action was already taken (race condition)
+  const turnCtx = { actionTaken: false };
+
   const timeoutTimer = setTimeout(() => {
     // ── TURN TIMEOUT: auto-fold ──
+    if (turnCtx.actionTaken) return;  // Action watcher already handled this turn
+    turnCtx.actionTaken = true;
+
     log.warn(`[${botName}] ⏰ Turn timeout (${TURN_TIMEOUT_MS / 1000}s) — auto-checking/folding`);
 
-    // Try check first, fall back to fold
-    let sent = botInstance.client.check();
-    if (!sent) sent = botInstance.client.fold();
+    // Guard: client may be null during reconnection
+    let sent = false;
+    if (botInstance.client) {
+      sent = botInstance.client.check();
+      if (!sent) sent = botInstance.client.fold();
+    }
 
     logHistory(botInstance.profileDir, 'timeout_action', {
       action: sent ? 'auto_check_or_fold' : 'timeout_send_failed',
@@ -130,13 +140,15 @@ function addPendingTurn(botName, botInstance) {
     updatePendingTurnsFile();
   }, TURN_TIMEOUT_MS);
 
-  pendingTurns.set(botName, { since, timeoutTimer });
+  pendingTurns.set(botName, { since, timeoutTimer, turnCtx });
   updatePendingTurnsFile();
 }
 
 function removePendingTurn(botName) {
   if (pendingTurns.has(botName)) {
-    clearTimeout(pendingTurns.get(botName).timeoutTimer);
+    const entry = pendingTurns.get(botName);
+    entry.turnCtx.actionTaken = true;  // Prevent timeout from firing
+    clearTimeout(entry.timeoutTimer);
     pendingTurns.delete(botName);
     updatePendingTurnsFile();
   }
@@ -181,7 +193,7 @@ class BotInstance {
     this.gameUrl    = gameUrl;
     this.autoSeat   = opts.autoSeat ?? true;
     this.stack      = opts.stack || 1000;
-    this.isHost     = opts.isHost || false;
+    // Note: CoachBot no longer connects through orchestrator (uses browser bridge instead)
 
     if (!fs.existsSync(this.profileDir)) {
       fs.mkdirSync(this.profileDir, { recursive: true });
@@ -274,6 +286,7 @@ class BotInstance {
         });
         deleteFile(this.files.turn);
         removePendingTurn(this.botName);
+        this._stopActionWatcher();
         this.actionInProgress = false;
       }
 
@@ -294,7 +307,6 @@ class BotInstance {
       log.info(`[${this.botName}] ★ MY TURN | call=$${turnInfo.callAmount} pot=$${turnInfo.pot}`);
       writeJSON(this.files.turn, ctx);
 
-      // Add to pending queue + start timeout
       addPendingTurn(this.botName, this);
       this._startActionWatcher();
     });
@@ -398,7 +410,7 @@ class BotInstance {
   // ── Execute action ────────────────────────────
   async _executeAction(action) {
     const act    = (action.action || action.act || '').toLowerCase();
-    const amount = action.amount ? parseInt(action.amount) : undefined;
+    const amount = action.amount ? parseInt(action.amount, 10) : undefined;
     if (!act) return;
 
     // Chat
@@ -450,7 +462,7 @@ class BotInstance {
     // Kill any legacy bridge-live.js running for this bot
     if (fs.existsSync(this.files.pid)) {
       try {
-        const oldPid = parseInt(fs.readFileSync(this.files.pid, 'utf-8').trim());
+        const oldPid = parseInt(fs.readFileSync(this.files.pid, 'utf-8').trim(), 10);
         if (oldPid && oldPid !== process.pid) {
           try {
             process.kill(oldPid, 0);
@@ -505,7 +517,7 @@ class BotInstance {
 (function killOldOrchestrator() {
   try {
     if (fs.existsSync(ORCHESTRATOR_PID)) {
-      const oldPid = parseInt(fs.readFileSync(ORCHESTRATOR_PID, 'utf-8').trim());
+      const oldPid = parseInt(fs.readFileSync(ORCHESTRATOR_PID, 'utf-8').trim(), 10);
       if (oldPid && oldPid !== process.pid) {
         try {
           process.kill(oldPid, 0);
@@ -534,7 +546,7 @@ async function main() {
   }
 
   const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
-  const { gameUrl, bots, hostBot, autoSeat = true, stack = 1000 } = config;
+  const { gameUrl, bots, autoSeat = true, stack = 1000 } = config;
 
   if (!gameUrl || !bots || bots.length === 0) {
     log.error('game.json must have "gameUrl" and non-empty "bots" array');
@@ -546,7 +558,6 @@ async function main() {
 |  POKER ORCHESTRATOR — Multi-Bot Manager (Robust)      |
 |  Game:  ${gameUrl.substring(0, 50).padEnd(50)} |
 |  Bots:  ${bots.join(', ').substring(0, 50).padEnd(50)} |
-|  Host:  ${(hostBot || 'none').padEnd(50)} |
 |  Timeout: ${TURN_TIMEOUT_MS / 1000}s auto-fold | Heartbeat: ${HEARTBEAT_INTERVAL / 1000}s       |
 +═══════════════════════════════════════════════════════+
 `);
@@ -555,9 +566,11 @@ async function main() {
   const instances = [];
   for (const botName of bots) {
     instances.push(new BotInstance(botName, gameUrl, {
-      autoSeat, stack, isHost: botName === hostBot,
+      autoSeat, stack,
     }));
   }
+
+  // Note: CoachBot connects via browser bridge (coach-bridge.js), not through orchestrator
 
   for (let i = 0; i < instances.length; i++) {
     const bot = instances[i];
@@ -593,13 +606,20 @@ async function main() {
   - Bot disconnect: auto-reconnect (up to ${instances[0]?.maxReconnects || 20} attempts)
   - Heartbeat: every ${HEARTBEAT_INTERVAL / 1000}s
 
-  Press Ctrl+C to stop.
+  Press Ctrl+C to stop (or delete game.json).
 `);
 
   // ── Graceful shutdown ──────────────────────────
+  let gameJsonWatcher = null;
+  let isShuttingDown = false;
+
   function cleanup() {
+    if (isShuttingDown) return;  // prevent double-cleanup from SIGTERM + gameJsonWatcher race
+    isShuttingDown = true;
+
     log.info('Shutting down all bots...');
     if (heartbeatTimer) clearInterval(heartbeatTimer);
+    if (gameJsonWatcher) clearInterval(gameJsonWatcher);
 
     for (const bot of instances) {
       try { bot.cleanup(); } catch {}
@@ -613,12 +633,21 @@ async function main() {
     process.exit(0);
   }
 
+  // ── Watch for game.json deletion (= game end signal from CC) ──
+  gameJsonWatcher = setInterval(() => {
+    if (!fs.existsSync(CONFIG_FILE)) {
+      log.warn('game.json was deleted — CC signaled game end. Shutting down gracefully.');
+      cleanup();
+    }
+  }, 2000);  // check every 2s
+
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
 }
 
 main().catch(e => {
   log.error(`Fatal: ${e.message}`);
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
   deleteFile(ORCHESTRATOR_PID);
   deleteFile(PENDING_TURNS_FILE);
   deleteFile(HEARTBEAT_FILE);

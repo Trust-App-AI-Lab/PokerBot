@@ -6,7 +6,7 @@ The wrong size can turn a +EV bet into a -EV one.
 
 ## Fundamental Relationship: Size ↔ Balance
 
-Your bet size dictates how much you can bluff to stay balanced:
+Your bet size dictates how much you can bluff to stay balanced. This isn't a rule you memorize — it follows directly from pot odds math. If you bet half pot, villain needs 25% equity to call profitably, which means 33% of your bets can be bluffs without villain gaining by calling. Use `odds.py` when you need exact numbers for a specific spot.
 
 | Bet Size   | Villain's Pot Odds | Your Bluff Frequency |
 |------------|-------------------|----------------------|
@@ -34,7 +34,7 @@ Larger bets → more bluffs allowed → more polarized range required.
 - **In Position**: 3x the open (open 2.5BB → 3-bet to 7.5BB)
 - **Out of Position**: 3.5-4x the open (open 2.5BB → 3-bet to 9-10BB)
 - **Per cold caller**: Add ~1x the open per player who called between
-- **Why bigger OOP?** Bigger pot discourages flat calls → more folds or 4-bets → cleaner decision tree when OOP
+- **Why bigger OOP?** Being OOP means less equity realization and harder decisions on every street (see `gto-fundamentals.md` Position section). A bigger 3-bet compensates by discouraging flat calls → more folds or 4-bets → cleaner decision tree when you can't act last
 
 ### 4-Bet
 - **Standard**: 2.2-2.5x the 3-bet
@@ -124,7 +124,7 @@ Larger bets → more bluffs allowed → more polarized range required.
 
 ## SPR-Based Committal Decisions
 
-SPR (Stack-to-Pot Ratio) determines how committed you are:
+SPR (Stack-to-Pot Ratio) tells you how committed you already are to the pot — it's the ratio of your remaining stack to the current pot. A low SPR means you can't fold anymore because too much of your stack is already in. `odds.py` calculates this for you when you feed it the pot and bet amounts.
 
 | SPR   | Commitment Level | Hand Needed |
 |-------|-----------------|-------------|

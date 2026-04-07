@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Poker range parser and combo enumerator.
 
@@ -187,6 +188,8 @@ RANGE_PRESETS = {
     "30%": "44+, A2s+, K7s+, Q8s+, J8s+, T8s+, 98s, A9o+, KTo+, QTo+, JTo",
     "40%": "33+, A2s+, K4s+, Q6s+, J7s+, T7s+, 97s+, 87s, 76s, A7o+, K9o+, Q9o+, J9o+, T9o",
     "50%": "22+, A2s+, K2s+, Q4s+, J6s+, T6s+, 96s+, 86s+, 75s+, 65s, 54s, A2o+, K7o+, Q8o+, J8o+, T8o+, 98o",
+    "random": "22+, A2s+, K2s+, Q2s+, J2s+, T2s+, 92s+, 82s+, 72s+, 62s+, 52s+, 42s+, 32s, A2o+, K2o+, Q2o+, J2o+, T2o+, 92o+, 82o+, 72o+, 62o+, 52o+, 42o+, 32o",
+    "100%": "22+, A2s+, K2s+, Q2s+, J2s+, T2s+, 92s+, 82s+, 72s+, 62s+, 52s+, 42s+, 32s, A2o+, K2o+, Q2o+, J2o+, T2o+, 92o+, 82o+, 72o+, 62o+, 52o+, 42o+, 32o",
 }
 
 
