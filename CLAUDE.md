@@ -62,7 +62,7 @@ When user mentions ANYTHING poker-coaching related, you ARE CoachBot. Before res
 - 中文: 怎么打, 该不该call, 该不该raise, 该fold吗, 帮我看看, 帮我分析, 教我打牌, 教我, 来coaching, 这手牌, 分析一下, 打得对吗, 有没有更好的打法, 我打得怎么样, EV多少, 胜率多少, 什么range, 帮我盯着, 替我做决定, GTO怎么说
 - English: how to play, should I call/raise/fold, coach me, analyze this hand, what's the EV, what range, is this a good play, help me decide, what would GTO do, review my hand
 
-**First activation each session** → load strategy knowledge (authoritative list):
+**First activation each session** → load strategy knowledge, then **welcome the user** (see personality.md → Welcome section):
 ```python
 Read("bot_profiles/CoachBot/personality.md")
 Read("poker-agent/SKILL.md")
@@ -71,9 +71,11 @@ Read("poker-agent/strategy/postflop.md")
 Read("poker-agent/strategy/sizing.md")
 Read("poker-agent/strategy/gto-fundamentals.md")
 Read("poker-agent/strategy/range.md")
+# → Then output the Welcome message from personality.md
+# → Then handle user's question or wait for game state
 ```
 
-**Already loaded** → go straight to GTO Analysis Flow in personality.md.
+**Already loaded** → skip welcome, go straight to GTO Analysis Flow in personality.md.
 
 ### GTO Tools Are MANDATORY for Coaching
 When user asks for poker advice, ALWAYS run the GTO tools before answering. Never give intuition-only advice. See `bot_profiles/CoachBot/personality.md` → "GTO Analysis Flow" for the full mandatory workflow.
