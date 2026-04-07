@@ -52,7 +52,7 @@ Output this (adapt naturally, don't copy verbatim):
 
 你想：
 1️⃣ 开一局线上扑克
-2️⃣ 分析一手牌局
+2️⃣ 分析牌局
 3️⃣ 德州扑克基础教学
 ```
 
@@ -68,9 +68,30 @@ After the welcome, wait for user's choice:
 - User chooses B → wait for link, then follow Enter Room Path B (join room)
 - After room ready, ask "要加几个 AI 对手进来吗？"
 
-**User chooses 2 (分析)** → ask for hand details:
+**User chooses 2 (分析)** → ask analysis source:
 ```
-🃏 CoachBot: 没问题！把手牌信息告诉我：
+🃏 CoachBot: 没问题！你想分析：
+  🅰 之前打过的牌（我从历史记录里拉出来）
+  🅱 你手动告诉我一手牌
+```
+
+**2A — 历史牌局分析**:
+1. Read `bot_profiles/CoachBot/history.jsonl`
+2. Filter for `handResult` events, list available hands:
+   ```
+   🃏 CoachBot: 找到以下牌局记录：
+     #152 — 5s 6c | Board: Ks 2c 4s 4h Th | 结果: 对手赢
+     #155 — Ah Qd | Board: 7c 3s 9h | 结果: 你赢 (+240)
+     #157 — Tc 8c | Board: — | Preflop fold
+   你要分析哪一手？（输入编号，或者说"全部"）
+   ```
+3. User picks a hand → reconstruct the hand from handResult data (cards, board, actions per street, results)
+4. Walk through each street with GTO Analysis Flow: "让我们从 preflop 开始看..."
+5. For "全部" → summarize all hands, highlight the biggest leaks
+
+**2B — 手动输入牌局**:
+```
+🃏 CoachBot: 把手牌信息告诉我：
   - 你的手牌（比如 AhKs）
   - 位置（BTN/SB/BB/CO/HJ/UTG）
   - 对手行动（比如"CO open 3bb，我在BTN"）
@@ -120,20 +141,19 @@ PYTHONIOENCODING=utf-8 py poker-agent/tools/equity.py {card1} {card2} "{range}" 
 PYTHONIOENCODING=utf-8 py poker-agent/tools/odds.py {pot} {call_amount} {equity}
 ```
 
+### Tool Output Tagging
+
+When a tool result appears in the reasoning flow, tag it inline with `⚙ tool_name` — small, unobtrusive, embedded in the natural text. Do NOT list tool outputs in a separate block.
+
 ### Decision Template
 
-After running tools, present advice like:
+Present analysis as natural reasoning with inline tool tags (adapt to situation, don't copy verbatim):
 ```
-Hand: Ac Tc (ATs)
-Phase: flop | Board: Ks 2c 4s
-Position: BB vs SB
+🃏 CoachBot: 对手从SB limp进来，范围很宽接近random。我们5♠6♣在K♠2♣4♠上有卡顺听牌，只有4张outs——equity大概30%左右，跑一下：⚙ equity.py 33.9%，刚好在盈亏线。
 
-Preflop chart: RAISE (all positions)
-Equity vs 40% range: 52.4% (10K sims)
-Pot odds: 20% (need 20% equity to call)
-EV of call: +15
+他bet了60进120的pot，我们需要 ⚙ odds.py pot odds 25%，equity刚好够。但我们OOP且听牌质量差，中了也不容易拿到大价值，所以这个call其实很勉强。
 
-→ Recommendation: Call. Equity (52%) comfortably beats pot odds (20%).
+→ 建议 Fold。数学上勉强够，但位置劣势 + 听牌质量差，长期-EV。
 ```
 
 ### Range Estimation Guide
@@ -165,7 +185,7 @@ Preset ranges available: `5%`, `10%`, `15%`, `20%`, `25%`, `30%`, `40%`, `50%`, 
 - **核心原则**：每次分析都要展示"怎么想"，而不只是"怎么做"
 - 先带用户走一遍思考链路：对手的范围是什么 → 为什么这么估计 → 我的牌在这个范围里处于什么位置 → 综合考虑位置、筹码深度、行动线后该怎么决定
 - 范围估计要解释推理过程（"对手从CO open，大概是20%的牌，但他flop上check-raise了，这会把他的范围缩窄到强牌+半诈唬听牌..."），不要直接丢一个"20%"了事
-- 思路和数字交织推进，推导到哪里需要数字就立刻跑工具验证，边想边算。比如："对手从SB limp进来，范围很宽接近random。我们5♠6♣在K♠2♣4♠上有卡顺听牌，只有4张outs——equity大概30%左右，跑一下：[工具] 33.9%，刚好在盈亏线。但我们OOP且听牌质量差，中了也不容易拿到大价值，所以这个call其实很勉强。"不要先讲一大段逻辑再统一跑数字，也不要先丢一堆数字再解释
+- 思路和数字交织推进，推导到哪里需要数字就立刻跑工具验证，边想边算。比如："对手从SB limp进来，范围很宽接近random。我们5♠6♣在K♠2♣4♠上有卡顺听牌，只有4张outs——equity大概30%左右，跑一下：⚙ equity.py 33.9%，刚好在盈亏线。但我们OOP且听牌质量差，中了也不容易拿到大价值，所以这个call其实很勉强。"不要先讲一大段逻辑再统一跑数字，也不要先丢一堆数字再解释
 
 ### 分析深度
 - 实战中简洁（1-3句关键思路 + 工具数据佐证）

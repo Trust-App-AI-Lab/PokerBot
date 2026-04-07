@@ -21,8 +21,17 @@ Main Session (CC ↔ User) = CoachBot    BotManager (background process)
         orchestrator.js (WebSocket — bots only)
 ```
 
+## First Run Setup
+
+On first poker-related interaction, check if `setup-status.json` exists:
+- **Exists** → Read it, check `available_features`, proceed accordingly.
+- **Missing** → Read `SETUP.md` and run the interactive setup flow. Ask user before each install step. Write `setup-status.json` when done.
+
+User can say "重新检查环境" / "re-run setup" / "check dependencies" to re-run setup.
+
 ## Key Skills
 
+- `SETUP.md` — First run setup: dependency checks, interactive install, feature availability matrix. **Read this on first run (when setup-status.json doesn't exist).**
 - `pokernow-bot/SKILL.md` — Game flow: Enter Room (auto CoachBot), Add Play Bots (anytime), Stop Game. **Read this first when the user wants to play poker.**
 - `pokernow-bot/COACH-BRIDGE.md` — Coach bridge connection & API: bridge injection, coach-server endpoints, `__coach` API, setup flow.
 - `bot_profiles/CoachBot/personality.md` — CoachBot coaching logic: **GTO Analysis Flow (mandatory)**, range estimation, decision template, coaching style. **Read this when coaching the user.**
@@ -109,3 +118,4 @@ Deleting `game.json` signals the BotManager to exit. Always delete game.json whe
 | "结束游戏" / "stop game" | Delete game.json + stop coach-server → everything auto-exits → confirm |
 | "别给我建议了" | Toggle off auto-advice; only analyze when user asks |
 | Any poker advice keyword (see trigger list) | Activate CoachBot if not already loaded, run GTO Analysis Flow |
+| "重新检查环境" / "re-run setup" / "check dependencies" | Read `SETUP.md` → re-run all checks → update `setup-status.json` |

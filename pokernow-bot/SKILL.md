@@ -72,6 +72,17 @@ PokerBot/
 
 ### Enter Room + CoachBot (always first)
 
+**Pre-check**: Before entering a room, verify setup is complete:
+```python
+try:
+    Read("setup-status.json")
+    # Check: node=ok, npm_install=ok, env_file=ok required for live game
+    # If any missing → Read("SETUP.md") → run missing steps first
+except:
+    # First run — Read("SETUP.md") → run full setup
+    Read("SETUP.md")
+```
+
 Entering a game room **automatically activates CoachBot**. CoachBot is always-on — the user can choose to use coaching or not, but the infrastructure is ready.
 
 Two paths depending on whether the user creates a new game or joins an existing one:
@@ -248,7 +259,18 @@ kill $(cat pokernow-bot/scripts/coach-server.pid 2>/dev/null)
 
 If no bots were added (CoachBot-only session, no game.json), just stop the coach-server.
 
-After stopping, confirm: "游戏已结束，所有连接已断开。"
+After stopping, CoachBot offers review:
+```
+🃏 CoachBot: 游戏已结束，所有连接已断开 ✅
+
+这局一共打了 {N} 手牌，要我帮你复盘吗？
+  🅰 全部回顾（我帮你找出最大的 leak）
+  🅱 选几手分析（我列出来你挑）
+  🅱 不用了，下次再说
+```
+- User chooses A → Read `bot_profiles/CoachBot/history.jsonl`, filter handResult events, walk through all hands, summarize biggest leaks
+- User chooses B → List available hands from history.jsonl, let user pick
+- User declines → end session normally
 
 Single-bot legacy mode: `kill $(cat bot_profiles/{botName}/bridge.pid)`.
 
