@@ -60,15 +60,7 @@ Packages installed: ws (WebSocket), dotenv (env config), node-fetch (HTTP client
 
 Features blocked without npm install: ALL live game connections.
 
-### Step 5: .env Configuration
-
-**Check**: `ls pokernow-bot/.env` (exists = configured)
-**Action**: `cp pokernow-bot/.env.example pokernow-bot/.env`
-**Ask user**: "需要从 .env.example 创建 .env 配置文件，可以吗？（GAME_URL 之后进房间时自动填写）"
-
-Note: GAME_URL is set dynamically at game start by SKILL.md flow — user doesn't need to edit .env manually.
-
-### Step 6: claude CLI (Optional — PlayBots)
+### Step 5: claude CLI (Optional — PlayBots)
 
 **Check**: `claude --version`
 **If missing**: Tell user this is needed for PlayBot autonomous decisions.
@@ -78,7 +70,7 @@ Note: GAME_URL is set dynamically at game start by SKILL.md flow — user doesn'
 
 Features blocked without claude CLI: BotManager cannot spawn subagents → PlayBots cannot make autonomous decisions. CoachBot coaching works fine.
 
-### Step 7: Claude in Chrome (Optional — Live CoachBot)
+### Step 6: Claude in Chrome (Optional — Live CoachBot)
 
 **Check**: Cannot auto-detect. Ask user:
   "你有安装 Claude in Chrome 浏览器扩展吗？（CoachBot 实时看牌需要它来注入 bridge）"
@@ -89,13 +81,13 @@ Features blocked without claude CLI: BotManager cannot spawn subagents → PlayB
 
 Features blocked without Claude in Chrome: coach-bridge.js cannot be injected → CoachBot cannot read live game state. Offline coaching (你告诉我牌面我帮你分析) still works.
 
-### Step 8: botmanager.sh Permissions
+### Step 7: botmanager.sh Permissions
 
 **Check**: `test -x pokernow-bot/scripts/botmanager.sh`
 **Fix command**: `chmod +x pokernow-bot/scripts/botmanager.sh`
 **Auto-fix**: Yes, no need to ask user (harmless operation).
 
-### Step 9: Port 3456 Availability
+### Step 8: Port 3456 Availability
 
 **Check**: `curl -s http://localhost:3456/ 2>&1` → should fail (port free) or show coach-server response (already running)
 **If occupied by another process**: Tell user port 3456 is in use, coach-server may fail to start.
@@ -114,7 +106,6 @@ After running all steps, write `setup-status.json`:
     "python": { "status": "ok", "version": "3.12.0" },
     "numpy": { "status": "ok", "version": "1.26.0" },
     "npm_install": { "status": "ok" },
-    "env_file": { "status": "ok" },
     "claude_cli": { "status": "skip", "reason": "User declined — PlayBots unavailable" },
     "chrome_extension": { "status": "ok" },
     "botmanager_chmod": { "status": "ok" },
@@ -138,7 +129,8 @@ After setup, CC determines which features are available:
 | Feature | Requires |
 |---------|----------|
 | **Offline Coaching** (手动输入牌面分析) | Python + numpy |
-| **Live CoachBot** (实时读牌 + 建议) | Node.js + npm + Python + numpy + Chrome Extension |
+| **Live CoachBot — WebSocket** (终端模式，CC渲染牌桌) | Node.js + npm + Python + numpy |
+| **Live CoachBot — Chrome** (浏览器模式，用户在PokerNow操作) | Node.js + npm + Python + numpy + Chrome Extension |
 | **PlayBots** (AI 自主决策) | Node.js + npm + Python + claude CLI |
 | **Full System** (全部功能) | ALL of the above |
 

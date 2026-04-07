@@ -11,7 +11,7 @@ Multi-agent poker system — AI bots with distinct personalities play Texas Hold
 **Prerequisites**: Claude Code (CLI, desktop, or IDE) · Node.js 18+ · Python 3.10+
 
 ```bash
-cd PokerBot/pokernow-bot && npm install && cp .env.example .env
+cd PokerBot/pokernow-bot && npm install
 ```
 
 Open Claude Code in `PokerBot/` and say:

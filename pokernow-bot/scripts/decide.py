@@ -35,16 +35,12 @@ SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 ENGINE_DIR   = os.path.join(SCRIPT_DIR, "..")                # pokernow-bot/
 PROJECT_ROOT = os.path.join(ENGINE_DIR, "..")                 # PokerBot/
 
-# Load bot name from .env
-import re as _re
-_env_file = os.path.join(ENGINE_DIR, ".env")
+# Bot name: from CLI --bot arg, or default
 BOT_NAME = "ARIA_Bot"
-if os.path.exists(_env_file):
-    with open(_env_file) as _f:
-        for _line in _f:
-            _m = _re.match(r'BOT_NAME\s*=\s*(.+)', _line.strip())
-            if _m:
-                BOT_NAME = _m.group(1).strip()
+for _i, _a in enumerate(sys.argv):
+    if _a == "--bot" and _i + 1 < len(sys.argv):
+        BOT_NAME = sys.argv[_i + 1]
+        break
 
 # All files in bot_profiles/{BOT_NAME}/
 PROFILE_DIR = os.path.join(PROJECT_ROOT, "bot_profiles", BOT_NAME)

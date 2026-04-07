@@ -76,7 +76,7 @@ PokerBot/
 ```python
 try:
     Read("setup-status.json")
-    # Check: node=ok, npm_install=ok, env_file=ok required for live game
+    # Check: node=ok, npm_install=ok required for live game
     # If any missing → Read("SETUP.md") → run missing steps first
 except:
     # First run — Read("SETUP.md") → run full setup
@@ -109,9 +109,18 @@ User says: "加入这个房间 https://www.pokernow.com/games/pglXXXXXX" or past
 
 #### CoachBot Activation (automatic on Enter Room)
 
-Runs as part of room entry. After the PokerNow game tab is open:
+Runs as part of room entry. **Two modes** — CC picks based on environment:
 
-**1. Load CoachBot docs + strategy knowledge**
+| Mode | Requires | How user plays | Best for |
+|------|----------|----------------|----------|
+| **Chrome Bridge** | Claude in Chrome extension | User plays in PokerNow browser UI, CC coaches alongside | Desktop with Chrome |
+| **WebSocket Direct** | Nothing (just Node.js) | CC renders poker table visually, user tells CC actions in chat | Any environment, no Chrome needed |
+
+**Detection logic**: Check `setup-status.json` → if `chrome_extension=ok`, use Chrome Bridge. Otherwise, auto-fall back to WebSocket Direct. User can also force mode: "用终端模式" → WebSocket Direct, "用浏览器" → Chrome Bridge.
+
+---
+
+**1. Load CoachBot docs + strategy knowledge** (both modes)
 ```python
 Read("pokernow-bot/COACH-BRIDGE.md")                 # bridge API, endpoints, action format — REQUIRED for gameplay
 # Then trigger CoachBot Activation (see CLAUDE.md) if not already loaded this session:
@@ -124,27 +133,65 @@ Read("poker-agent/strategy/gto-fundamentals.md") # core GTO concepts
 Read("poker-agent/strategy/range.md")            # range estimation
 ```
 
-**2. Inject Bridge** (once per game tab)
+---
+
+##### Mode A: Chrome Bridge (default when Chrome extension available)
+
+**2a. Inject Bridge** (once per game tab)
 ```python
 bridgeCode = Read("pokernow-bot/scripts/coach-bridge.js")
 javascript_tool(tabId, bridgeCode)
 ```
 Hooks the page's WebSocket, exposes `window.__coach` API. Only needed once — after injection, all communication is HTTP.
 
-**3. Start Coach Server**
+**3a. Start Coach Server**
 ```bash
 cd PokerBot/pokernow-bot && node scripts/coach-server.js "gameUrl" &
 ```
 Auto-kills old instance via PID file. Bridge starts pushing state to server, polling `/action`.
 
-**4. CoachBot Ready**
+**4a. CoachBot Ready (Chrome mode)**
 
-From here on, CC operates as CoachBot in the main session:
+CC operates as CoachBot in the main session:
 - **Read state**: `Read("bot_profiles/CoachBot/state.json")` — instant, preprocessed
 - **Send action**: `curl -s -X POST localhost:3456/action -H "Content-Type: application/json" -d '{"action":"call"}'`
 - **Check result**: `curl -s localhost:3456/action-result`
 
 See **`COACH-BRIDGE.md`** for full `__coach` API reference, endpoints, autoAdvice toggle.
+
+---
+
+##### Mode B: WebSocket Direct (no Chrome needed)
+
+**2b. Start coach-ws.js**
+```bash
+cd PokerBot/pokernow-bot && node scripts/coach-ws.js "gameUrl" --name "PlayerName" &
+```
+Connects directly to PokerNow via WebSocket. Auto-kills old instance via PID file. Writes state.json/turn.json to `bot_profiles/CoachBot/`, reads action.json.
+
+**3b. CoachBot Ready (WebSocket mode)**
+
+CC operates as CoachBot — reads state and renders a visual poker table for the user:
+- **Read state**: `Read("bot_profiles/CoachBot/state.json")` — same format as Chrome mode
+- **Detect turn**: `Read("bot_profiles/CoachBot/turn.json")` — exists when it's our turn
+- **Render table**: Update `poker-table.jsx` with current state data → user sees visual poker table
+- **Send action**: Write `bot_profiles/CoachBot/action.json` → `{"action":"call"}` — coach-ws.js picks it up and executes
+- **No curl, no coach-server needed** — all communication is file-based
+
+**Gameplay loop (WebSocket mode)**:
+```
+CC polls state.json (every few seconds or on user prompt)
+  → when turn.json appears:
+    1. Read turn.json for full state
+    2. Run GTO analysis (tools + strategy)
+    3. Render poker-table.jsx with current state
+    4. Show user: table visual + coaching advice + available actions
+    5. User says "call" / "raise 200" / "fold"
+    6. CC writes action.json → coach-ws.js executes → turn.json deleted
+    7. Wait for next turn
+```
+
+**Note**: In WebSocket mode, the user does NOT open PokerNow in browser. CC is the interface. The seat request needs host approval just like a PlayBot joining.
 
 ---
 

@@ -19,8 +19,6 @@
 
 const path = require('path');
 const fs   = require('fs');
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
-
 const { PokerNowClient } = require('../lib/poker-now');
 const { GameState }       = require('../lib/game-state');
 

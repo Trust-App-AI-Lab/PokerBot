@@ -22,16 +22,8 @@ PROJECT_ROOT = os.path.join(ENGINE_DIR, "..")
 # Find python executable
 PY = "py" if os.name == "nt" else "python3"
 
-# Load BOT_NAME from .env
-import re
-_env_file = os.path.join(ENGINE_DIR, ".env")
+# Bot name: default (matches decide.py default)
 BOT_NAME = "ARIA_Bot"
-if os.path.exists(_env_file):
-    with open(_env_file) as f:
-        for line in f:
-            m = re.match(r'BOT_NAME\s*=\s*(.+)', line.strip())
-            if m:
-                BOT_NAME = m.group(1).strip()
 
 # Files in bot_profiles/{BOT_NAME}/
 PROFILE_DIR = os.path.join(PROJECT_ROOT, "bot_profiles", BOT_NAME)

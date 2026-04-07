@@ -47,6 +47,8 @@ User can say "重新检查环境" / "re-run setup" / "check dependencies" to re-
 - `bot_profiles/CoachBot/personality.md` — Observer-only GTO coach (reads user's game via browser bridge, never acts autonomously)
 - `pokernow-bot/scripts/orchestrator.js` — Multi-bot WebSocket manager (bots only, CoachBot not included)
 - `pokernow-bot/scripts/coach-bridge.js` — Browser-injected CoachBot bridge (hooks page WebSocket, exposes `__coach` API)
+- `pokernow-bot/scripts/coach-ws.js` — CoachBot WebSocket direct bridge (no Chrome needed, CLI args)
+- `pokernow-bot/scripts/poker-table.jsx` — Visual poker table renderer (CC updates with state data)
 - `pokernow-bot/scripts/bridge-live.js` — Single-bot WebSocket bridge (legacy)
 - `pokernow-bot/scripts/decide.py` — CLI interface with action validation
 - `poker-agent/tools/` — Python calculation tools (equity, odds, hand eval, preflop ranges)
@@ -56,12 +58,21 @@ User can say "重新检查环境" / "re-run setup" / "check dependencies" to re-
 ### Dual-Session Architecture
 Main session (= CoachBot) handles user interaction and coaching. BotManager runs as a background process (`botmanager.sh` + `claude -p`) and handles all play bot decisions autonomously. They communicate via shared JSON files. Never try to run bot decisions in the main session — it blocks user conversation.
 
-### CoachBot = HTTP-Based (No javascript_tool in game loop)
-CoachBot injects `coach-bridge.js` into PokerNow tab via `javascript_tool` **once at game start**. After that:
-- **Read state**: `Read("bot_profiles/CoachBot/state.json")` — instant, preprocessed by coach-server
+### CoachBot Two Modes
+CoachBot has two connection modes (see `pokernow-bot/SKILL.md` → CoachBot Activation for details):
+
+**Mode A: Chrome Bridge** (when Claude in Chrome is available)
+- Injects `coach-bridge.js` via `javascript_tool` once at game start
+- **Read state**: `Read("bot_profiles/CoachBot/state.json")` — preprocessed by coach-server
 - **Send action**: `curl -s -X POST localhost:3456/action -H "Content-Type: application/json" -d '{"action":"call"}'`
-- **Check result**: `curl -s localhost:3456/action-result`
 - **Start server**: `node pokernow-bot/scripts/coach-server.js "gameUrl"` (auto-kills old instance)
+
+**Mode B: WebSocket Direct** (no Chrome needed — fallback or user choice)
+- Starts `coach-ws.js` which connects directly via WebSocket
+- **Read state**: `Read("bot_profiles/CoachBot/state.json")` — same format
+- **Send action**: Write `bot_profiles/CoachBot/action.json` — file-based IPC
+- **Render table**: Update `poker-table.jsx` with state data → visual poker table for user
+- **Start bridge**: `node pokernow-bot/scripts/coach-ws.js "gameUrl" --name "PlayerName" &`
 - **No javascript_tool needed during gameplay** — all communication via HTTP + filesystem
 
 ### CoachBot Activation (MANDATORY)
