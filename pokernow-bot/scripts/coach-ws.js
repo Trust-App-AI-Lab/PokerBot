@@ -6,9 +6,9 @@
  * for play bots. CC reads state.json, shows the user a nice poker table render,
  * user says "call" / "raise 200" / "fold" in CC, CC writes action.json.
  *
- * This is the alternative to coach-bridge.js (Chrome injection).
- * Advantage: No Chrome extension needed. Works in any CC environment.
- * Tradeoff: User interacts via CC chat instead of the PokerNow browser UI.
+ * Used for pokernow.com fallback mode (when poker-server is not available).
+ * No Chrome extension needed. Works in any CC environment.
+ * User interacts via CC chat instead of a browser UI.
  *
  * Usage:
  *   node scripts/coach-ws.js <gameUrl> [--name BotName] [--seat N] [--stack N]
@@ -29,6 +29,7 @@
 const path = require('path');
 const fs   = require('fs');
 const http = require('http');
+const WebSocket = require('ws');
 
 const { PokerNowClient } = require('../lib/poker-now');
 const { GameState }       = require('../lib/game-state');
@@ -59,7 +60,7 @@ function parseArgs() {
   return config;
 }
 
-const HTTP_PORT = 3457; // default, overridable with --port
+const HTTP_PORT = 3456; // pokernow bridge default (poker-server uses 3457)
 
 const CONFIG = parseArgs();
 
@@ -124,38 +125,38 @@ function readJSON(fp) {
 function deleteFile(fp) {
   try { fs.unlinkSync(fp); } catch {}
 }
-function logHistory(type, data) {
-  const record = { time: new Date().toISOString(), type, ...data };
-  try { fs.appendFileSync(HISTORY_FILE, JSON.stringify(record) + '\n'); } catch {}
+// Unified history format — same as poker-server's history.jsonl
+// Event types: hand_start, action, board, hand_end
+function logEvent(event) {
+  const ordered = { ts: new Date().toISOString(), ...event };
+  try { fs.appendFileSync(HISTORY_FILE, JSON.stringify(ordered) + '\n'); } catch {}
 }
+const ACT_NAME = { call:'call', check:'check', fold:'fold', bet:'bet', raise:'raise',
+  small_blind:'sb', big_blind:'bb', allin:'allin' };
 
-// ── Recent hand history ─────────────────────────
+// ── Recent hand history (parses unified event format) ──
 function getRecentHandsSummary(maxHands = 10) {
   try {
     if (!fs.existsSync(HISTORY_FILE)) return [];
     const lines = fs.readFileSync(HISTORY_FILE, 'utf-8').trim().split('\n');
     const hands = [];
-    let current = null;
+    let cur = null;
     for (const line of lines) {
       try {
-        const r = JSON.parse(line);
-        if (r.type === 'hand_start') {
-          current = {
-            time: r.time, myCards: r.myCards || [], myStack: r.myStack,
-            players: (r.players || []).map(p => p.name),
-            blinds: r.bigBlind, actions: [], result: null,
-          };
-        } else if (r.type === 'action' && current) {
-          current.actions.push({ action: r.action, amount: r.amount });
-        } else if (r.type === 'hand_end' && current) {
-          current.board = r.board || [];
-          current.pot = r.pot;
-          current.results = r.results || [];
-          current.endStack = r.myStack;
-          const shown = (r.players || []).filter(p => p.cards && !p.isMe);
-          if (shown.length > 0) current.opponentCards = shown.map(p => ({ name: p.name, cards: p.cards }));
-          hands.push(current);
-          current = null;
+        const ev = JSON.parse(line);
+        if (ev.type === 'hand_start') {
+          cur = { hand: ev.hand, blinds: ev.blinds, positions: ev.positions,
+                  players: ev.players, actions: [], board: [] };
+        } else if (ev.type === 'action' && cur && ev.hand === cur.hand) {
+          cur.actions.push(ev.action);
+        } else if (ev.type === 'board' && cur && ev.hand === cur.hand) {
+          cur.board = ev.cards;
+        } else if (ev.type === 'hand_end' && cur && ev.hand === cur.hand) {
+          cur.results = ev.results;
+          cur.shown = ev.shown;
+          cur.stacks = ev.stacks;
+          hands.push(cur);
+          cur = null;
         }
       } catch {}
     }
@@ -243,6 +244,13 @@ async function main() {
   let actionWatcher = null;
   const chatMessages = [];
   const MAX_CHAT = 50;
+  let currentHandNum = 0;       // track hand number for history events
+  let lastLoggedBoard = 0;      // track board cards count to detect new board events
+  let loggedActionKeys = new Set(); // track which actions we've already logged
+
+  // ── Forward declarations for WebSocket broadcast (used by event handlers below) ──
+  const browserClients = new Set();
+  let wsBroadcast, wsSend, buildPokerServerState;
 
   // ── Wire events ───────────────────────────────
 
@@ -259,7 +267,6 @@ async function main() {
       chatMessages.push(msg);
       if (chatMessages.length > MAX_CHAT) chatMessages.shift();
       log.info(`Chat: ${msg.playerName}: ${msg.message}`);
-      logHistory('chat_received', msg);
     }
   });
 
@@ -281,47 +288,144 @@ async function main() {
 
     writeJSON(STATE_FILE, ctx);
 
+    // Broadcast to browser clients (poker-server compatible format)
+    if (wsBroadcast) {
+      const pokerState = buildPokerServerState(hand);
+      pokerState.myCards = hand.myCards || [];
+      pokerState.myStack = hand.myStack || 0;
+      pokerState.isMyTurn = !!hand.isMyTurn;
+      if (hand.isMyTurn) {
+        pokerState.callAmount = hand.callAmount || 0;
+        pokerState.minRaise = hand.minRaise || 0;
+        pokerState.maxRaise = hand.maxRaise || 0;
+      }
+      wsBroadcast('state', { state: pokerState });
+      if (hand.isMyTurn) {
+        wsBroadcast('your_turn', {
+          player: CONFIG.botName,
+          callAmount: hand.callAmount || 0,
+          minRaise: hand.minRaise || 0,
+          maxRaise: hand.maxRaise || 0,
+          pot: hand.pot || 0,
+        });
+      }
+    }
+
     const phase = hand.phase;
 
-    // Hand start
+    // ── History: hand_start ──
     if (phase === 'preflop' && lastPhase !== 'preflop') {
       log.info('============= NEW HAND =============');
       actionInProgress = false;
-      logHistory('hand_start', {
-        myCards: hand.myCards, myStack: hand.myStack,
-        players: hand.players.map(p => ({ name: p.name, stack: p.stack, isMe: p.isMe })),
-        smallBlind: hand.smallBlind, bigBlind: hand.bigBlind,
+      currentHandNum = hand.handNumber ?? (currentHandNum + 1);
+      lastLoggedBoard = 0;
+      loggedActionKeys = new Set();
+
+      // Build players map — pokernow only shows our own cards, others are hidden
+      const players = {};
+      for (const p of hand.players) {
+        if (p.isMe) {
+          players[p.name] = [hand.myCards || [], hand.myStack || p.stack];
+        } else {
+          players[p.name] = [[], p.stack];
+        }
+      }
+
+      // Calculate positions from dealer seat
+      const positions = {};
+      const readyPlayers = hand.players.filter(p => p.status === 'inGame' || !p.status);
+      const n = readyPlayers.length;
+      if (n > 0 && hand.dealer !== null) {
+        const dealerIdx = readyPlayers.findIndex(p => p.seat === hand.dealer);
+        if (dealerIdx >= 0) {
+          if (n === 2) {
+            positions[readyPlayers[dealerIdx].name] = 'BTN';
+            positions[readyPlayers[(dealerIdx + 1) % n].name] = 'BB';
+          } else if (n === 3) {
+            positions[readyPlayers[dealerIdx].name] = 'BTN';
+            positions[readyPlayers[(dealerIdx + 1) % n].name] = 'SB';
+            positions[readyPlayers[(dealerIdx + 2) % n].name] = 'BB';
+          } else {
+            const labels = ['BTN', 'SB', 'BB'];
+            const midLabels = { 1: ['UTG'], 2: ['UTG','CO'], 3: ['UTG','MP','CO'],
+              4: ['UTG','UTG+1','MP','CO'], 5: ['UTG','UTG+1','MP','HJ','CO'] };
+            for (let i = 0; i < n; i++) {
+              const name = readyPlayers[(dealerIdx + i) % n].name;
+              if (i < 3) { positions[name] = labels[i]; }
+              else {
+                const mid = midLabels[n - 3] || [];
+                positions[name] = mid[i - 3] || `UTG+${i - 3}`;
+              }
+            }
+          }
+        }
+      }
+
+      logEvent({
+        type: 'hand_start', hand: currentHandNum,
+        blinds: [hand.smallBlind || 10, hand.bigBlind || 20],
+        positions, players,
       });
     }
 
-    // Hand end
+    // ── History: board events ──
+    const boardLen = (hand.communityCards || []).length;
+    if (boardLen > lastLoggedBoard && boardLen >= 3) {
+      logEvent({ type: 'board', hand: currentHandNum, cards: [...hand.communityCards] });
+      lastLoggedBoard = boardLen;
+    }
+
+    // ── History: action events (log any new actions we haven't seen) ──
+    for (const a of (hand.actions || [])) {
+      const act = ACT_NAME[a.action] || a.action;
+      const actionStr = a.amount ? `${a.actor} ${act} ${a.amount}` : `${a.actor} ${act}`;
+      const key = `${currentHandNum}|${actionStr}`;
+      if (!loggedActionKeys.has(key)) {
+        loggedActionKeys.add(key);
+        logEvent({ type: 'action', hand: currentHandNum, action: actionStr });
+      }
+    }
+
+    // ── History: hand_end ──
     if ((phase === 'showdown' || phase === 'waiting') &&
         lastPhase !== 'showdown' && lastPhase !== 'waiting' && lastPhase !== '') {
-      logHistory('hand_end', {
-        myCards: hand.myCards, board: hand.communityCards,
-        pot: hand.pot, myStack: hand.myStack, results: hand.results,
-        players: hand.players.map(p => {
-          const out = { name: p.name, stack: p.stack, folded: p.folded, isMe: p.isMe };
-          if (p.cards?.length > 0) out.cards = p.cards;
-          return out;
-        }),
-        actions: hand.actions.slice(-15),
-      });
+      const stacks = {};
+      const shown = [];
+      for (const p of hand.players) {
+        stacks[p.name] = p.stack;
+        if (p.cards && p.cards.length > 0 && !p.folded) shown.push(p.name);
+      }
+      const results = (hand.results || []).map(r =>
+        `${r.winner || r.name || '?'} ${r.amount || 0}${r.hand ? ' ' + r.hand : ''}`
+      );
+      logEvent({ type: 'hand_end', hand: currentHandNum, results, shown, stacks });
+
+      // Broadcast hand_result to browser (poker-server compatible)
+      if (typeof wsBroadcast === 'function') {
+        const publicPlayers = (hand.players || []).map(p => {
+          const obj = { name: p.name, seat: p.seat, stack: p.stack, folded: !!p.folded };
+          if (p.cards && p.cards.length > 0 && !p.folded) obj.cards = p.cards;
+          return obj;
+        });
+        wsBroadcast('hand_result', {
+          handNumber: currentHandNum,
+          positions: buildPokerServerState(hand).positions,
+          results: hand.results || [],
+          board: hand.communityCards || [],
+          players: publicPlayers,
+          pot: hand.pot || 0,
+          actions: (hand.actions || []).map(a => ({
+            actor: a.actor, action: a.action, amount: a.amount || undefined, phase: a.phase,
+          })),
+          blinds: [hand.smallBlind || 10, hand.bigBlind || 20],
+        });
+      }
+
       deleteFile(TURN_FILE);
       actionInProgress = false;
     }
 
     lastPhase = phase;
-
-    logHistory('state', {
-      phase, myCards: hand.myCards, board: hand.communityCards,
-      pot: hand.pot, myStack: hand.myStack, isMyTurn: hand.isMyTurn,
-      players: hand.players.map(p => {
-        const out = { name: p.name, stack: p.stack, bet: p.bet, folded: p.folded, isMe: p.isMe };
-        if (p.cards?.length > 0) out.cards = p.cards;
-        return out;
-      }),
-    });
   });
 
   // MY TURN
@@ -348,6 +452,9 @@ async function main() {
   // Cards dealt
   gameState.on('cards_dealt', (cards) => {
     log.info(`My cards: ${cards.join(' ')}`);
+    if (wsBroadcast) {
+      wsBroadcast('cards', { cards });
+    }
   });
 
   // Board updated
@@ -355,19 +462,9 @@ async function main() {
     log.info(`Board: ${board.join(' ')}`);
   });
 
-  // Showdown
+  // Showdown — logged via hand_end in state_updated, just reset action flag here
   gameState.on('showdown', (hand) => {
     log.info(`SHOWDOWN | pot=${hand.pot}`);
-    logHistory('showdown', {
-      myCards: hand.myCards, board: hand.communityCards,
-      pot: hand.pot, myStack: hand.myStack,
-      players: hand.players.map(p => {
-        const out = { name: p.name, stack: p.stack, folded: p.folded, isMe: p.isMe };
-        if (p.cards?.length > 0) out.cards = p.cards;
-        return out;
-      }),
-      results: hand.results, actions: hand.actions.slice(-15),
-    });
     actionInProgress = false;
   });
 
@@ -447,8 +544,7 @@ async function main() {
       const msg = action.message || '';
       if (!msg) return;
       const sent = client.sendChat(msg);
-      log.info(`>>> Chat: "${msg}" → ${sent ? 'OK' : 'FAIL'}`);
-      logHistory('chat', { message: msg, sent });
+      log.info(`Chat: "${msg}" → ${sent ? 'OK' : 'FAIL'}`);
       return;
     }
 
@@ -465,22 +561,19 @@ async function main() {
         case 'approve_player': sent = await client.approvePlayer(pid, action.stack || 1000); break;
         case 'remove_player':  sent = await client.removePlayer(pid); break;
       }
-      log.info(`>>> Host: ${act} → ${sent ? 'OK' : 'FAIL'}`);
-      logHistory('host_action', { action: act, sent });
+      log.info(`Host: ${act} → ${sent ? 'OK' : 'FAIL'}`);
       return;
     }
 
     // Seat actions
     if (act === 'stand_up' || act === 'leave_seat') {
       const sent = client.emitEvent('action', { type: 'QNH' });
-      log.info(`>>> leave_seat → ${sent ? 'OK' : 'FAIL'}`);
-      logHistory('action', { action: 'leave_seat', sent });
+      log.info(`Action: leave_seat → ${sent ? 'OK' : 'FAIL'}`);
       return;
     }
     if (act === 'sit_back') {
       const sent = client.sendPokerAction('PLAYER_SIT_BACK');
-      log.info(`>>> sit_back → ${sent ? 'OK' : 'FAIL'}`);
-      logHistory('action', { action: 'sit_back', sent });
+      log.info(`Action: sit_back → ${sent ? 'OK' : 'FAIL'}`);
       return;
     }
     if (act === 'sit' || act === 'request_seat') {
@@ -497,8 +590,6 @@ async function main() {
 
     // Game actions
     actionInProgress = true;
-    log.info(`>>> ${act}${amount ? ' $' + amount : ''}`);
-
     let sent = false;
     switch (act) {
       case 'fold':  sent = client.fold(); break;
@@ -509,8 +600,7 @@ async function main() {
       default:      sent = client.sendPokerAction(`PLAYER_${act.toUpperCase()}`);
     }
 
-    log.info(`Send: ${sent ? 'OK' : 'FAIL'}`);
-    logHistory('action', { action: act, amount: amount || null, sent });
+    log.info(`Action: ${act}${amount ? ' $' + amount : ''} → ${sent ? 'OK' : 'FAIL'}`);
     deleteFile(TURN_FILE);
 
     setTimeout(() => { actionInProgress = false; }, 1000);
@@ -593,6 +683,133 @@ async function main() {
   httpServer.listen(httpPort, () => {
     log.info(`HTTP server: http://localhost:${httpPort} (poker table UI)`);
   });
+
+  // ── WebSocket server (broadcasts to browser clients, same protocol as poker-server) ──
+  const wss = new WebSocket.Server({ server: httpServer });
+
+  wss.on('connection', (clientWs) => {
+    const clientInfo = { ws: clientWs, playerName: '' };
+    browserClients.add(clientInfo);
+    log.info(`Browser client connected (${browserClients.size} total)`);
+
+    // Send welcome
+    const hand = gameState.hand;
+    wsSend(clientWs, 'welcome', {
+      blinds: `${hand.smallBlind || 10}/${hand.bigBlind || 20}`,
+      defaultStack: CONFIG.stack || 1000,
+      players: (hand.players || []).map(p => ({ name: p.name, stack: p.stack })),
+      serverType: 'pokernow',
+    });
+
+    clientWs.on('message', (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === 'join' || msg.type === 'reconnect') {
+          clientInfo.playerName = msg.name || CONFIG.botName;
+          wsSend(clientWs, 'joined', { name: clientInfo.playerName, seat: 0, stack: hand.myStack || CONFIG.stack });
+          // Send current state immediately
+          const state = buildPokerServerState(hand);
+          wsSend(clientWs, 'state', { state });
+          if (hand.myCards && hand.myCards.length > 0) {
+            wsSend(clientWs, 'cards', { cards: hand.myCards });
+          }
+        } else if (msg.type === 'action') {
+          // Write action.json for bridge to execute
+          const action = { action: msg.action };
+          if (msg.amount) action.amount = msg.amount;
+          writeJSON(ACTION_FILE, action);
+          log.info(`WS action from browser: ${JSON.stringify(action)}`);
+        }
+      } catch {}
+    });
+
+    clientWs.on('close', () => {
+      browserClients.delete(clientInfo);
+      log.info(`Browser client disconnected (${browserClients.size} remaining)`);
+    });
+  });
+
+  wsSend = function(clientWs, type, data) {
+    if (clientWs.readyState === WebSocket.OPEN) {
+      clientWs.send(JSON.stringify({ type, ...data }));
+    }
+  };
+
+  wsBroadcast = function(type, data) {
+    const msg = JSON.stringify({ type, ...data });
+    for (const c of browserClients) {
+      if (c.ws.readyState === WebSocket.OPEN) c.ws.send(msg);
+    }
+  };
+
+  // ── Convert pokernow state to poker-server format ──
+  buildPokerServerState = function(hand) {
+    if (!hand) return { phase: 'waiting', players: [], pot: 0, communityCards: [], actions: [] };
+
+    const players = (hand.players || []).map((p, i) => ({
+      name: p.name,
+      seat: p.seat !== undefined ? p.seat : i,
+      stack: p.stack || 0,
+      bet: p.bet || 0,
+      folded: !!p.folded,
+      allIn: p.stack === 0 && !p.folded,
+      isMe: !!p.isMe,
+      ...(p.isMe && hand.myCards ? { cards: hand.myCards } : {}),
+    }));
+
+    // Build positions map
+    const positions = {};
+    const readyPlayers = (hand.players || []).filter(p => !p.folded && (p.status === 'inGame' || !p.status));
+    const n = readyPlayers.length;
+    if (n > 0 && hand.dealer !== null && hand.dealer !== undefined) {
+      const dealerIdx = readyPlayers.findIndex(p => p.seat === hand.dealer);
+      if (dealerIdx >= 0) {
+        if (n === 2) {
+          positions[readyPlayers[dealerIdx].name] = 'BTN';
+          positions[readyPlayers[(dealerIdx + 1) % n].name] = 'BB';
+        } else if (n === 3) {
+          positions[readyPlayers[dealerIdx].name] = 'BTN';
+          positions[readyPlayers[(dealerIdx + 1) % n].name] = 'SB';
+          positions[readyPlayers[(dealerIdx + 2) % n].name] = 'BB';
+        } else {
+          const labels = ['BTN', 'SB', 'BB'];
+          const midLabels = { 1: ['UTG'], 2: ['UTG','CO'], 3: ['UTG','MP','CO'] };
+          for (let i = 0; i < n; i++) {
+            const name = readyPlayers[(dealerIdx + i) % n].name;
+            if (i < 3) { positions[name] = labels[i]; }
+            else {
+              const mid = midLabels[n - 3] || [];
+              positions[name] = mid[i - 3] || `UTG+${i - 3}`;
+            }
+          }
+        }
+      }
+    }
+
+    // Find current actor (pokernow tells us isMyTurn, but we don't know other players' turns directly)
+    let currentActor = null;
+    if (hand.isMyTurn) {
+      const me = (hand.players || []).find(p => p.isMe);
+      if (me) currentActor = me.name;
+    }
+
+    return {
+      phase: hand.phase || 'waiting',
+      handNumber: hand.handNumber ?? currentHandNum ?? 0,
+      pot: hand.pot || 0,
+      communityCards: hand.communityCards || [],
+      players,
+      actions: (hand.actions || []).map(a => ({
+        actor: a.actor, action: a.action, amount: a.amount || undefined, phase: a.phase,
+      })),
+      currentActor,
+      dealerSeat: hand.dealer,
+      positions,
+      smallBlind: hand.smallBlind || 10,
+      bigBlind: hand.bigBlind || 20,
+      currentBet: hand.currentBet || 0,
+    };
+  };
 
   // ── Connect ───────────────────────────────────
   try {

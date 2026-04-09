@@ -63,21 +63,21 @@ graph TD
 
 | Layer | Role | Contents |
 |-------|------|----------|
-| **Thinking Framework** | GTO思维方式——教怎么想，不是列规则 | `gto-fundamentals.md` (300 lines) |
-| **Applied Strategy** | 具体场景的决策推理 | `range.md` (340) · `preflop.md` (117) · `postflop.md` (123) · `sizing.md` (145) |
-| **Calculation Tools** | 数字验证，边想边算 | `equity.py` · `odds.py` · `preflop.py` · `evaluator.py` · `range_parser.py` |
+| **Thinking Framework** | GTO reasoning — teach how to think, not list rules | `gto-fundamentals.md` (300 lines) |
+| **Applied Strategy** | Scenario-specific decision reasoning | `range.md` (340) · `preflop.md` (117) · `postflop.md` (123) · `sizing.md` (145) |
+| **Calculation Tools** | Numeric verification, think-then-calculate | `equity.py` · `odds.py` · `preflop.py` · `evaluator.py` · `range_parser.py` |
 
 ## Strategy Documents
 
-**gto-fundamentals.md** — GTO思维框架。Balance的逻辑、MDF的推导、Polarization的演进、Position的底层原理（信息优势、equity realization、pot control）、Indifference principle、Exploitation的风险收益权衡。被所有其他文档引用。
+**gto-fundamentals.md** — GTO thinking framework. Logic of balance, MDF derivation, polarization progression, underlying principles of position (information advantage, equity realization, pot control), indifference principle, risk-reward tradeoffs of exploitation. Referenced by all other docs.
 
-**range.md** — 双向range推演。估计对手range的同时，意识到自己的range在对手眼里是什么。Preflop起点 → postflop三重过滤器（bet/call/check） → 混合策略执行 → opponent profiling。引用gto-fundamentals 4次，是thinking和application之间的桥梁。
+**range.md** — Two-way range reasoning. Estimate villain's range while staying aware of how your own range looks from their perspective. Preflop starting point → postflop triple filter (bet/call/check) → mixed strategy execution → opponent profiling. References gto-fundamentals 4 times — the bridge between thinking and application layers.
 
-**preflop.md** — 翻前决策。为什么打这手牌（equity × playability × position），RFI/3-bet/4-bet/BB defense各场景的逻辑推导。
+**preflop.md** — Preflop decisions. Why play this hand (equity × playability × position), logical derivation of RFI/3-bet/4-bet/BB defense scenarios.
 
-**postflop.md** — 翻后决策。Thinking loop: villain range → position → structural advantage → math verification。Board texture、c-bet、double barrel、river play、OOP as BB defender。
+**postflop.md** — Postflop decisions. Thinking loop: villain range → position → structural advantage → math verification. Board texture, c-bet, double barrel, river play, OOP as BB defender.
 
-**sizing.md** — 下注尺寸。Size↔balance关系、SPR commitment、street-by-street sizing规划。最接近参考手册风格。
+**sizing.md** — Bet sizing. Size↔balance relationship, SPR commitment, street-by-street sizing planning. Closest to reference-manual style.
 
 ## Tools
 
@@ -111,8 +111,8 @@ All tools: `python3 poker-agent/tools/<tool>.py`. Card notation: ranks `2-9 T J 
 
 ## Design Principles
 
-**Teach How to Think, Not Rules** — 所有文档解释"为什么"而不是列"做什么"。表格嵌入解释性上下文中，目标是让读者学会推理过程。
+**Teach How to Think, Not Rules** — Every document explains "why" rather than listing "what to do." Tables are embedded in explanatory context; the goal is for the reader to learn the reasoning process.
 
-**Three-Layer Architecture** — Thinking → Application → Tools。每一层都能独立使用，但组合起来最强。
+**Three-Layer Architecture** — Thinking → Application → Tools. Each layer can be used independently, but they're strongest combined.
 
-**Cross-Reference, Not Duplication** — 概念只在一个地方深入解释，其他地方通过cross-reference指向它。例如position的完整理论在gto-fundamentals，preflop/postflop/sizing只引用不重复。
+**Cross-Reference, Not Duplication** — Each concept is explained deeply in exactly one place; other docs cross-reference it. For example, the full theory of position lives in gto-fundamentals; preflop/postflop/sizing reference it without repeating.

@@ -2,7 +2,7 @@
 
 ## Identity
 - **Name**: ARIA_Bot
-- **Model**: sonnet
+- **Model**: haiku
 - **Use Tools**: yes
 
 ## Character

@@ -73,10 +73,16 @@ function readJSON(filepath) {
 function deleteFile(filepath) {
   try { fs.unlinkSync(filepath); } catch {}
 }
-function logHistory(profileDir, type, data) {
+// Compact history format (matches poker-server):
+// {hand, blinds, players:{name:[cards,stack]}, board, actions:["name act amt"], results:["winner amt hand"], stacks}
+// Unified history format — same as poker-server's history.jsonl
+const ACT_NAME = { call:'call', check:'check', fold:'fold', bet:'bet', raise:'raise',
+  small_blind:'sb', big_blind:'bb', allin:'allin' };
+
+function logBotEvent(profileDir, event) {
+  const ordered = { ts: new Date().toISOString(), ...event };
   const histFile = path.join(profileDir, 'history.jsonl');
-  const record = { time: new Date().toISOString(), type, ...data };
-  try { fs.appendFileSync(histFile, JSON.stringify(record) + '\n'); } catch {}
+  try { fs.appendFileSync(histFile, JSON.stringify(ordered) + '\n'); } catch {}
 }
 
 // ══════════════════════════════════════════════════
@@ -128,9 +134,7 @@ function addPendingTurn(botName, botInstance) {
       if (!sent) sent = botInstance.client.fold();
     }
 
-    logHistory(botInstance.profileDir, 'timeout_action', {
-      action: sent ? 'auto_check_or_fold' : 'timeout_send_failed',
-    });
+    log.warn(`[${botInstance.botName}] Timeout: ${sent ? 'auto_check_or_fold' : 'send_failed'}`);
 
     deleteFile(botInstance.files.turn);
     botInstance.actionInProgress = false;
@@ -213,6 +217,9 @@ class BotInstance {
     this.reconnectCount   = 0;
     this.maxReconnects    = 20;
     this._reconnecting    = false;
+    this._handNum         = 0;
+    this._loggedActionCount = 0;
+    this._lastBoardLen    = 0;
   }
 
   _makeLogger() {
@@ -266,22 +273,89 @@ class BotInstance {
 
       const phase = hand.phase;
 
+      // ── History: hand_start ──
       if (phase === 'preflop' && this.lastPhase !== 'preflop') {
         log.info(`[${this.botName}] ═══ NEW HAND ═══`);
         this.actionInProgress = false;
-        logHistory(this.profileDir, 'hand_start', {
-          myCards: hand.myCards, myStack: hand.myStack,
-          players: hand.players.map(p => ({ name: p.name, stack: p.stack, isMe: p.isMe })),
-          bigBlind: hand.bigBlind,
+        this._handNum = hand.handNumber ?? (this._handNum + 1);
+        this._loggedActionCount = 0;
+        this._lastBoardLen = 0;
+
+        const players = {};
+        for (const p of (hand.players || [])) {
+          if (p.isMe) {
+            players[p.name] = [hand.myCards || [], hand.myStack || p.stack];
+          } else {
+            players[p.name] = [[], p.stack];
+          }
+        }
+        // Position calc (same logic as coach-ws.js)
+        const positions = {};
+        const readyPlayers = (hand.players || []).filter(p => p.status === 'inGame' || !p.status);
+        const n = readyPlayers.length;
+        if (n > 0 && hand.dealer !== null) {
+          const dealerIdx = readyPlayers.findIndex(p => p.seat === hand.dealer);
+          if (dealerIdx >= 0) {
+            if (n === 2) {
+              positions[readyPlayers[dealerIdx].name] = 'BTN';
+              positions[readyPlayers[(dealerIdx + 1) % n].name] = 'BB';
+            } else if (n === 3) {
+              positions[readyPlayers[dealerIdx].name] = 'BTN';
+              positions[readyPlayers[(dealerIdx + 1) % n].name] = 'SB';
+              positions[readyPlayers[(dealerIdx + 2) % n].name] = 'BB';
+            } else {
+              const labels = ['BTN', 'SB', 'BB'];
+              const midLabels = { 1: ['UTG'], 2: ['UTG','CO'], 3: ['UTG','MP','CO'],
+                4: ['UTG','UTG+1','MP','CO'], 5: ['UTG','UTG+1','MP','HJ','CO'] };
+              for (let i = 0; i < n; i++) {
+                const name = readyPlayers[(dealerIdx + i) % n].name;
+                if (i < 3) { positions[name] = labels[i]; }
+                else {
+                  const mid = midLabels[n - 3] || [];
+                  positions[name] = mid[i - 3] || `UTG+${i - 3}`;
+                }
+              }
+            }
+          }
+        }
+        logBotEvent(this.profileDir, {
+          type: 'hand_start', hand: this._handNum,
+          blinds: [hand.smallBlind || 0, hand.bigBlind || 0],
+          positions, players,
         });
       }
 
+      // ── History: action events (log new ones) ──
+      if (hand.actions && hand.actions.length > this._loggedActionCount) {
+        for (let i = this._loggedActionCount; i < hand.actions.length; i++) {
+          const a = hand.actions[i];
+          const act = ACT_NAME[a.action] || a.action;
+          const actionStr = a.amount ? `${a.actor || a.player} ${act} ${a.amount}` : `${a.actor || a.player} ${act}`;
+          logBotEvent(this.profileDir, { type: 'action', hand: this._handNum, action: actionStr });
+        }
+        this._loggedActionCount = hand.actions.length;
+      }
+
+      // ── History: board events ──
+      const boardLen = (hand.communityCards || []).length;
+      if (boardLen > this._lastBoardLen && boardLen >= 3) {
+        logBotEvent(this.profileDir, { type: 'board', hand: this._handNum, cards: [...hand.communityCards] });
+        this._lastBoardLen = boardLen;
+      }
+
+      // ── History: hand_end ──
       if ((phase === 'showdown' || phase === 'waiting') &&
           this.lastPhase !== 'showdown' && this.lastPhase !== 'waiting' && this.lastPhase !== '') {
-        logHistory(this.profileDir, 'hand_end', {
-          myCards: hand.myCards, board: hand.communityCards,
-          pot: hand.pot, myStack: hand.myStack, results: hand.results,
-        });
+        const stacks = {};
+        const shown = [];
+        for (const p of (hand.players || [])) {
+          stacks[p.name] = p.stack;
+          if (p.cards && p.cards.length > 0 && !p.folded) shown.push(p.name);
+        }
+        const results = (hand.results || []).map(r =>
+          `${r.winner || r.name} ${r.amount || r.pot || 0}${r.hand ? ' ' + r.hand : ''}`
+        );
+        logBotEvent(this.profileDir, { type: 'hand_end', hand: this._handNum, results, shown, stacks });
         deleteFile(this.files.turn);
         removePendingTurn(this.botName);
         this._stopActionWatcher();
@@ -415,7 +489,7 @@ class BotInstance {
     if (act === 'chat') {
       const msg = action.message || action.content || '';
       if (msg) this.client.sendChat(msg);
-      logHistory(this.profileDir, 'chat', { message: msg });
+      log.info(`[${this.botName}] Chat: "${msg}"`);
       return;
     }
 
@@ -434,7 +508,6 @@ class BotInstance {
         case 'remove_player':  sent = await this.client.removePlayer(pid); break;
       }
       log.info(`[${this.botName}] Host: ${act} → ${sent ? 'OK' : 'FAIL'}`);
-      logHistory(this.profileDir, 'host_action', { action: act, sent });
       return;
     }
 
@@ -449,8 +522,7 @@ class BotInstance {
       default:                  sent = this.client.sendPokerAction(`PLAYER_${act.toUpperCase()}`);
     }
 
-    log.info(`[${this.botName}] → ${act}${amount ? ' $' + amount : ''}: ${sent ? 'OK' : 'FAIL'}`);
-    logHistory(this.profileDir, 'action', { action: act, amount: amount || null, sent });
+    log.info(`[${this.botName}] Action: ${act}${amount ? ' $' + amount : ''} → ${sent ? 'OK' : 'FAIL'}`);
     deleteFile(this.files.turn);
     setTimeout(() => { this.actionInProgress = false; }, 1000);
   }
@@ -568,7 +640,7 @@ async function main() {
     }));
   }
 
-  // Note: CoachBot connects via browser bridge (coach-bridge.js), not through orchestrator
+  // Note: CoachBot connects via coach-ws.js or poker-server API, not through orchestrator
 
   for (let i = 0; i < instances.length; i++) {
     const bot = instances[i];

@@ -1,15 +1,17 @@
 ---
 name: pokernow-bot
 description: >
-  Play Texas Hold'em on Poker Now (pokernow.com) — multi-agent poker system.
-  Supports single bot or N-bot games with different AI personalities and models.
-  Trigger when user mentions Poker Now, poker bot, 德州扑克, "play poker",
-  "来一局", "开一桌", or the PokerBot project.
+  FALLBACK — Connect to Poker Now (pokernow.com) when poker-server is not available.
+  Only use when the self-hosted poker-server cannot be used.
+  Primary game backend is poker-server/ (sibling directory).
 ---
 
-# Poker Now Bot — Multi-Agent Architecture
+# Poker Now Bot — FALLBACK Mode
 
-Claude plays Texas Hold'em LIVE on Poker Now via WebSocket.
+**⚠️ This is the FALLBACK backend.** The primary way to play is via `poker-server/` (self-hosted).
+Only use pokernow-bot when poker-server is not an option (e.g., joining someone else's pokernow.com room).
+
+Claude connects to Poker Now via WebSocket.
 Enter a room and CoachBot is automatically ready. Add PlayBots anytime — at game start or mid-game.
 
 ## Project Structure
@@ -22,8 +24,7 @@ PokerBot/
       game-state.js       ← Game state parser
     scripts/
       orchestrator.js     ← Multi-bot manager (reads game.json)
-      coach-bridge.js     ← Browser-injected CoachBot bridge
-      coach-server.js     ← HTTP bridge server (:3456)
+      coach-ws.js         ← CoachBot WebSocket bridge (direct connect)
       bridge-live.js      ← Single-bot bridge (legacy)
       decide.py           ← Python CLI interface
   poker-agent/            ← GTO strategy + tools (shared)
@@ -34,7 +35,6 @@ PokerBot/
     .template/            ← Copy to create new bot
     CoachBot/
       personality.md      ← Observer-only coach (opus, GTO, no game actions)
-      state.json          ← Live game state (pushed by bridge → server)
     Shark_Alice/
       personality.md      ← Identity, style, model, strategy
       turn.json           ← Written when it's this bot's turn (ephemeral)
@@ -51,10 +51,10 @@ PokerBot/
 ┌──────────────────────────────────────────────────────┐
 │  Enter Room (+ auto CoachBot)  ──── always first     │
 │       │                                              │
-│       │   CoachBot 自动激活：bridge注入 + server启动  │
-│       │   + 策略知识加载 → 随时可以coaching           │
+│       │   CoachBot auto-activates: bridge injection    │
+│       │   + server start + strategy knowledge loaded  │
 │       │                                              │
-│       ├──▶  Add Play Bots  (随时可加，开局或中途)     │
+│       ├──▶  Add Play Bots  (anytime, start or mid)   │
 │       │                                              │
 │       └──▶  Stop Game                                │
 └──────────────────────────────────────────────────────┘
@@ -63,10 +63,10 @@ PokerBot/
 **Common scenarios:**
 | User intent | Flow |
 |---|---|
-| 纯coaching（和真人打） | Enter Room → CoachBot auto-ready → play |
-| AI互打观赏 | Enter Room → Add Bots → watch |
-| coaching + AI混战 | Enter Room → Add Bots → play with coaching |
-| 中途加bot | (already in game) → Add Bots |
+| Pure coaching (play with humans) | Enter Room → CoachBot auto-ready → play |
+| AI-only spectating | Enter Room → Add Bots → watch |
+| Coaching + AI mixed game | Enter Room → Add Bots → play with coaching |
+| Add bots mid-game | (already in game) → Add Bots |
 
 ---
 
@@ -87,43 +87,39 @@ Entering a game room **automatically activates CoachBot**. CoachBot is always-on
 
 Two paths depending on whether the user creates a new game or joins an existing one:
 
-#### Path A: Create new game ("来一局poker" / "play poker")
+#### Path A: Create new game ("play poker")
 
-1. **Open PokerNow** — `tabs_create_mcp()` → `navigate(tabId, "https://www.pokernow.com/start-game")`
-2. **User creates room** — tell user: "请在浏览器里填昵称、点 CREATE GAME、选座位入座"
-3. **CC waits for room** — poll `tabs_context_mcp()` until URL matches `pokernow.com/games/pglXXXXXX`, extract gameId
-4. **Activate CoachBot** (see below)
-5. **CC asks** — "要加bot吗？几个？" (coaching is already ready)
+**⚠️ Prefer poker-server for new games.** Only use pokernow.com if user specifically requests it.
+
+1. **Tell user** — "Open https://www.pokernow.com/start-game in your browser, create a room, then share the link with me"
+2. **User creates room** and shares link
+3. **Extract game URL** from user's message (regex: `pokernow\.com/games/\w+`)
+4. **Ask user's in-game name** — coach-ws.js will join as this name
+5. **Activate CoachBot** (see below) — coach-ws.js joins the room via WebSocket and requests a seat
+6. **Tell user** — "Approve the seat request in your pokernow browser, then open localhost:3456 to play through the bridged view"
+7. **CC asks** — "Want to add bots? How many?" (coaching is already ready)
 
 #### Path B: Join existing game (user provides a link)
 
-User says: "加入这个房间 https://www.pokernow.com/games/pglXXXXXX" or pastes a link.
+User pastes a pokernow link.
 
 1. **Extract game URL** from user's message (regex: `pokernow\.com/games/\w+`)
-2. **Open game** — `tabs_create_mcp()` → `navigate(tabId, game_url)`
-3. **User takes seat** — tell user: "请在浏览器里填昵称入座"
-4. **Activate CoachBot** (see below)
-5. **CC asks** — "要加bot吗？" (coaching is already ready)
+2. **Ask user's in-game name** — coach-ws.js will join as this name
+3. **Activate CoachBot** (see below) — coach-ws.js joins via WebSocket, requests a seat
+4. **Tell user** — "Ask the host to approve the seat request, then open localhost:3456 to play"
+5. **CC asks** — "Want to add bots?" (coaching is already ready)
 
 **Note**: In Path B, the user is NOT the host. If adding bots, the host (someone else) must approve them. CC should warn the user about this.
 
 #### CoachBot Activation (automatic on Enter Room)
 
-Runs as part of room entry. **Two modes** — CC picks based on environment:
-
-| Mode | Requires | How user plays | Best for |
-|------|----------|----------------|----------|
-| **Chrome Bridge** | Claude in Chrome extension | User plays in PokerNow browser UI, CC coaches alongside | Desktop with Chrome |
-| **WebSocket Direct** | Nothing (just Node.js) | CC renders poker table visually, user tells CC actions in chat | Any environment, no Chrome needed |
-
-**Detection logic**: Check `setup-status.json` → if `chrome_extension=ok`, use Chrome Bridge. Otherwise, auto-fall back to WebSocket Direct. User can also force mode: "用终端模式" → WebSocket Direct, "用浏览器" → Chrome Bridge.
+Runs as part of room entry. Uses **WebSocket Direct** mode — connects to pokernow.com via WebSocket, no browser needed.
 
 ---
 
-**1. Load CoachBot docs + strategy knowledge** (both modes)
+**1. Load CoachBot docs + strategy knowledge**
 ```python
-Read("pokernow-bot/COACH-BRIDGE.md")                 # bridge API, endpoints, action format — REQUIRED for gameplay
-# Then trigger CoachBot Activation (see CLAUDE.md) if not already loaded this session:
+# Trigger CoachBot Activation (see CLAUDE.md) if not already loaded this session:
 Read("bot_profiles/CoachBot/personality.md")     # coaching style, GTO analysis flow
 Read("poker-agent/SKILL.md")                     # tool reference
 Read("poker-agent/strategy/preflop.md")          # preflop decisions
@@ -135,69 +131,42 @@ Read("poker-agent/strategy/range.md")            # range estimation
 
 ---
 
-##### Mode A: Chrome Bridge (default when Chrome extension available)
-
-**2a. Inject Bridge** (once per game tab)
-```python
-bridgeCode = Read("pokernow-bot/scripts/coach-bridge.js")
-javascript_tool(tabId, bridgeCode)
-```
-Hooks the page's WebSocket, exposes `window.__coach` API. Only needed once — after injection, all communication is HTTP.
-
-**3a. Start Coach Server**
+**2. Start coach-ws.js**
 ```bash
-cd PokerBot/pokernow-bot && node scripts/coach-server.js "gameUrl" &
+cd PokerBot/pokernow-bot && node scripts/coach-ws.js "gameUrl" --name "PlayerName" --port 3456 &
 ```
-Auto-kills old instance via PID file. Bridge starts pushing state to server, polling `/action`.
+Bridges PokerNow WebSocket → HTTP on `:3456`. Auto-kills old instance via PID file. Provides the same `/state` and `/action` HTTP API as poker-client.js — CC uses the same interface regardless of backend.
 
-**4a. CoachBot Ready (Chrome mode)**
+**3. CoachBot Ready**
 
-CC operates as CoachBot in the main session:
-- **Read state**: `Read("bot_profiles/CoachBot/state.json")` — instant, preprocessed
+CC operates as CoachBot via the unified `:3456` HTTP API (same as all other modes):
+- **Read state**: `curl -s localhost:3456/state` — includes user's cards (`myCards`)
 - **Send action**: `curl -s -X POST localhost:3456/action -H "Content-Type: application/json" -d '{"action":"call"}'`
-- **Check result**: `curl -s localhost:3456/action-result`
+- **No browser extension, no Chrome MCP needed** — pure HTTP API
 
-See **`COACH-BRIDGE.md`** for full `__coach` API reference, endpoints, autoAdvice toggle.
+User can open `http://localhost:3456` in browser for the visual table (poker-table.html, bridged view).
 
----
+**⚠️ The user CANNOT open pokernow.com directly to see their cards.** The session cookie belongs to the coach-ws.js Node process — the browser has no access to it. The only way to visualize the pokernow game is through localhost:3456 (the bridge). This is different from poker-server mode where the user connects directly.
 
-##### Mode B: WebSocket Direct (no Chrome needed)
-
-**2b. Start coach-ws.js**
-```bash
-cd PokerBot/pokernow-bot && node scripts/coach-ws.js "gameUrl" --name "PlayerName" &
+**Gameplay loop**:
 ```
-Connects directly to PokerNow via WebSocket. Auto-kills old instance via PID file. Writes state.json/turn.json to `bot_profiles/CoachBot/`, reads action.json.
-
-**3b. CoachBot Ready (WebSocket mode)**
-
-CC operates as CoachBot — reads state and renders a visual poker table for the user:
-- **Read state**: `Read("bot_profiles/CoachBot/state.json")` — same format as Chrome mode
-- **Detect turn**: `Read("bot_profiles/CoachBot/turn.json")` — exists when it's our turn
-- **Render table**: Update `poker-table.jsx` with current state data → user sees visual poker table
-- **Send action**: Write `bot_profiles/CoachBot/action.json` → `{"action":"call"}` — coach-ws.js picks it up and executes
-- **No curl, no coach-server needed** — all communication is file-based
-
-**Gameplay loop (WebSocket mode)**:
-```
-CC polls state.json (every few seconds or on user prompt)
-  → when turn.json appears:
-    1. Read turn.json for full state
+CC polls localhost:3456/state (every 2-3s)
+  → when isMyTurn == true:
+    1. Read state for cards, board, pot, actions
     2. Run GTO analysis (tools + strategy)
-    3. Render poker-table.jsx with current state
-    4. Show user: table visual + coaching advice + available actions
-    5. User says "call" / "raise 200" / "fold"
-    6. CC writes action.json → coach-ws.js executes → turn.json deleted
-    7. Wait for next turn
+    3. Show user: state summary + coaching advice + available actions
+    4. User says "call" / "raise 200" / "fold"
+    5. CC POSTs /action → coach-ws.js executes via WebSocket
+    6. Resume polling until next turn
 ```
 
-**Note**: In WebSocket mode, the user does NOT open PokerNow in browser. CC is the interface. The seat request needs host approval just like a PlayBot joining.
+**Note**: coach-ws.js joins the pokernow room as a player (using the user's name). The seat request needs host approval.
 
 ---
 
 ### Add Play Bots (anytime)
 
-**Trigger**: "加几个bot" / "让AI也来打" / "来一局poker"(implies bots) / listing bot names
+**Trigger**: "add bots" / "let AI play too" / "play poker" (implies bots) / listing bot names
 **Prerequisite**: Game room exists (URL known), CoachBot already active (from Enter Room)
 
 Can be invoked **at game start or mid-game**. The flow is the same either way.
@@ -205,7 +174,7 @@ Can be invoked **at game start or mid-game**. The flow is the same either way.
 #### B0. Load BotManager docs
 
 ```python
-Read("pokernow-bot/BOTMANAGER.md")  # prompt template, isolation rules, IPC files — REQUIRED for bot management
+Read("bot_profiles/BOTMANAGER.md")  # prompt template, isolation rules, IPC files — REQUIRED for bot management
 ```
 
 #### B1. Select Bots
@@ -262,23 +231,22 @@ Orchestrator connects all bots sequentially (3s apart to avoid rate limits), req
 
 #### B4. Approve Bots (if user is host)
 
-After orchestrator starts, bots send join requests. CoachBot bridge is always active (from Enter Room), so CC can auto-approve:
+After orchestrator starts, bots send join requests. The host (user in the pokernow.com browser) must approve them manually.
 
+Tell user: "Bots are requesting seats — please approve their join requests in the browser."
+
+CC monitors game state to confirm when bots are seated:
 ```
 loop (every 3s, until all new bots are seated):
-  state = __coach.getState()
-  for each player where status == "requestedGameIngress":
-    if player.name in game.json.bots:
-      → auto approve via __coach.hostAction('approve_player', {playerID, stackChange})
-      → tell user: "✅ Shark_Alice 已入座"
-    else:
-      → ask user: "有个叫 xxx 的人要加入，批准吗？"
+  state = curl -s localhost:3456/state
+  for each bot in game.json.bots:
+    if bot appears in state.players → "✅ {bot} seated"
 ```
 
 #### B5. Launch BotManager (if not already running)
 
 ```bash
-cd PokerBot/pokernow-bot && bash scripts/botmanager.sh &
+cd PokerBot && bash bot_profiles/botmanager.sh &
 ```
 
 BotManager runs as a Bash outer loop + `claude -p` per batch of pending turns.
@@ -290,7 +258,7 @@ If BotManager is already running (mid-game add), skip — it automatically picks
 
 ### Stop Game
 
-**Trigger**: "结束游戏" / "stop the game" / "关桌"
+**Trigger**: "stop game" / "stop the game" / "end game"
 
 ```python
 # Delete game.json — this is the ONLY step needed
@@ -299,24 +267,24 @@ Delete("PokerBot/game.json")
 
 Both orchestrator and BotManager detect deletion and exit gracefully. No manual `kill` needed.
 
-Also stop the coach-server:
+Also stop coach-ws.js if running:
 ```bash
-kill $(cat pokernow-bot/scripts/coach-server.pid 2>/dev/null)
+kill $(cat bot_profiles/CoachBot/coach-ws.pid 2>/dev/null)
 ```
 
-If no bots were added (CoachBot-only session, no game.json), just stop the coach-server.
+If no bots were added (CoachBot-only session, no game.json), just stop coach-ws.js.
 
-After stopping, CoachBot offers review:
+After stopping, CoachBot offers review (in the user's language — see personality.md language routing):
 ```
-🃏 CoachBot: 游戏已结束，所有连接已断开 ✅
+🃏 CoachBot: Game over, all connections closed ✅
 
-这局一共打了 {N} 手牌，要我帮你复盘吗？
-  🅰 全部回顾（我帮你找出最大的 leak）
-  🅱 选几手分析（我列出来你挑）
-  🅱 不用了，下次再说
+Played {N} hands total. Want me to review?
+  🅰 Full review (I'll find your biggest leaks)
+  🅱 Pick a few hands (I'll list them for you)
+  🅲 No thanks, maybe next time
 ```
-- User chooses A → Read `bot_profiles/CoachBot/history.jsonl`, filter handResult events, walk through all hands, summarize biggest leaks
-- User chooses B → List available hands from history.jsonl, let user pick
+- User chooses A → `curl localhost:3456/history` to read session history, walk through all hands, summarize biggest leaks
+- User chooses B → `curl localhost:3456/history?sessions` to list sessions, let user pick
 - User declines → end session normally
 
 Single-bot legacy mode: `kill $(cat bot_profiles/{botName}/bridge.pid)`.
@@ -329,18 +297,18 @@ Single-bot legacy mode: `kill $(cat bot_profiles/{botName}/bridge.pid)`.
 ┌──────────────────────────────────────────────────┐
 │  MAIN SESSION (CC ↔ User) = CoachBot             │
 │  - Free conversation — user can chat anytime     │
-│  - Browser bridge: reads state via coach-server  │
+│  - Reads state via HTTP: curl localhost:3456/state│
 │  - Gives GTO advice (auto or on-demand)          │
-│  - Executes user's actions via curl POST /action │
+│  - Executes user's actions: POST :3456/action    │
 │  - Game management (add/remove bots, stop game)  │
-│                     ▲                             │
-│                     │ filesystem IPC              │
-│                     ▼                             │
+│                                                  │
+│  coach-ws.js — bridges pokernow → :3456 HTTP     │
+│                                                  │
 │  BotManager (background process)                 │
 │  - botmanager.sh: polls pending-turns.json (2s)  │
 │  - claude -p: handles each batch of turns        │
 │  - Spawns subagents per bot (parallel)           │
-│  - Writes action.json per bot                    │
+│  - Writes action.json per bot (file-based IPC)   │
 │  - See BOTMANAGER.md for details                 │
 │                     ▲                             │
 │                     │ WebSocket                   │
@@ -348,6 +316,8 @@ Single-bot legacy mode: `kill $(cat bot_profiles/{botName}/bridge.pid)`.
 │  orchestrator.js — manages bot WebSocket conns   │
 └──────────────────────────────────────────────────┘
 ```
+
+**Key difference from poker-server mode**: CoachBot uses the same HTTP API (:3456) in both modes, but BotManager in pokernow mode uses file-based IPC (pending-turns.json → action.json) via orchestrator.js, rather than direct HTTP to server.
 
 **Why dual-session?** CC can only do one thing at a time — if it's running bot decisions, the user can't chat. By splitting:
 - **Main session** stays responsive — user chats freely
@@ -362,4 +332,11 @@ Turn timeout: 60s (auto check/fold, CoachBot exempt). Per-bot reconnection with 
 
 ## Communication Files
 
-See `BOTMANAGER.md` for detailed file tables. Key files: `game.json` (config, delete = stop), `pending-turns.json` (orchestrator → BotManager), `turn.json` / `action.json` (per-bot ephemeral IPC), `state.json` (coach-server → CoachBot).
+**CoachBot** uses HTTP API on `:3456` (served by coach-ws.js) — same as all other modes. No file-based IPC for CoachBot.
+
+**BotManager** uses file-based IPC via orchestrator.js:
+- `game.json` — bot config (delete = stop all bots)
+- `pending-turns.json` — orchestrator → BotManager (which bots need to act)
+- `turn.json` / `action.json` — per-bot ephemeral IPC (orchestrator ↔ BotManager)
+
+See `BOTMANAGER.md` for detailed file tables.

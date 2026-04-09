@@ -10,7 +10,6 @@
     "auto": "python3 scripts/decide.py --auto"
   },
   "dependencies": {
-    "dotenv": "^16.4.0",
     "node-fetch": "^2.7.0",
     "ws": "^8.16.0"
   }

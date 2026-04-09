@@ -1,8 +1,8 @@
 # PokerBot
 
-Multi-agent poker system — AI bots with distinct personalities play Texas Hold'em live on pokernow.com, powered by Claude Code.
+Multi-agent poker system — AI bots with distinct personalities play Texas Hold'em, powered by Claude Code. Self-hosted game server (primary) with pokernow.com fallback.
 
-`WebSocket` · `Multi-Agent` · `GTO Tools` · `Dual-Session` · `Live Coaching`
+`Self-Hosted` · `WebSocket` · `Multi-Agent` · `GTO Tools` · `Dual-Session` · `Live Coaching`
 
 ---
 
@@ -11,20 +11,23 @@ Multi-agent poker system — AI bots with distinct personalities play Texas Hold
 **Prerequisites**: Claude Code (CLI, desktop, or IDE) · Node.js 18+ · Python 3.10+
 
 ```bash
-cd PokerBot/pokernow-bot && npm install
+cd PokerBot/poker-server && npm install    # Primary: self-hosted server
+cd PokerBot/pokernow-bot && npm install    # Fallback: pokernow.com connector
 ```
 
 Open Claude Code in `PokerBot/` and say:
 
-> "来一局poker" — 创建房间，CoachBot 自动就绪
+> "play poker" — start self-hosted server, open localhost:3457 in browser
 >
-> "加入这个房间 https://www.pokernow.com/games/pglXXXXXX" — 加入已有房间
+> "join pokernow.com/games/pglXXXXXX" — join an existing pokernow room (fallback)
 >
-> "加几个bot进来" — 随时加AI上桌（开局或中途）
+> "add bots" — add AI players to the table (at start or mid-game)
 >
-> "加一个新bot，性格是喜欢bluff的老头" — 自然语言建bot
+> "create a new bot, aggressive old man who loves to bluff" — build bots with natural language
 >
-> "结束游戏" — 停止一切
+> "public game" — localtunnel for remote access
+>
+> "stop game" — shut everything down
 
 ## Features
 
@@ -34,9 +37,11 @@ Open Claude Code in `PokerBot/` and say:
 
 ![System Architecture](docs/images/architecture.svg)
 
-## Three Subsystems
+## Four Subsystems
 
-**pokernow-bot/ — Runtime Engine**: WebSocket connections to pokernow.com, dual-session architecture (Main Session + BotManager), browser bridge for CoachBot, orchestrator for multi-bot management. Everything that makes the system run. 8 scripts · 2 libs · 3 docs.
+**poker-server/ — PRIMARY Game Backend**: Self-hosted Texas Hold'em server. HTTP + WebSocket on port 3457, browser UI for human players, `/state` and `/action` API for CC. Optional `--public` flag for localtunnel access. No browser extensions needed.
+
+**pokernow-bot/ — FALLBACK Engine**: WebSocket connections to pokernow.com, dual-session architecture (Main Session + BotManager), orchestrator for multi-bot management. Only used when joining someone else's pokernow.com room.
 
 **poker-agent/ — GTO Brain**: GTO knowledge + calculation tools. Five strategy documents (teach thinking, not rules), five Python tools (equity, odds, preflop, evaluator, range parser). Three-layer architecture: Thinking → Application → Tools. 5 strategy docs (1,025 lines) · 5 tools (1,343 lines).
 
@@ -46,13 +51,13 @@ Open Claude Code in `PokerBot/` and say:
 
 ![Bot Roster](docs/images/bot-roster.svg)
 
-Create new bots with natural language: "建一个TAG风格的bot，用opus模型". Each bot lives in `bot_profiles/{name}/personality.md`. Copy from `.template/` to create new bots.
+Create new bots with natural language: "create a TAG-style bot using opus model". Each bot lives in `bot_profiles/{name}/personality.md`. Copy from `.template/` to create new bots.
 
 ## Dual-Session Architecture
 
-**Main Session = CoachBot**: Always responsive. User chats freely, gets GTO advice, confirms actions. Reads game state via coach-server (HTTP), sends actions via curl. Never blocked by bot decisions.
+**Main Session = CoachBot**: Always responsive. User chats freely, gets GTO advice, confirms actions. Reads game state via poker-server API (`/state`), sends actions via `/action`. Never blocked by bot decisions.
 
-**Background = BotManager**: Invisible to user. `botmanager.sh` polls for pending turns every 2s. Each batch spawns a fresh `claude -p` session that creates parallel subagents (one per bot). Writes action.json, exits.
+**Background = BotManager**: Invisible to user. `bot_profiles/botmanager.sh` polls for pending turns every 2s. Each batch spawns a fresh `claude -p` session that creates parallel subagents (one per bot). Writes action.json, exits.
 
 **Orchestrator = Bridge**: Connects all bots to PokerNow via WebSocket. Routes turns (writes pending-turns.json + turn.json), reads actions (polls action.json), executes moves. Auto check/fold after 60s.
 
@@ -66,7 +71,7 @@ Three layers ensure no bot cheats:
 
 **Layer 1 — Data**: Orchestrator only puts each bot's own hole cards in their turn.json. No cross-bot data at the WebSocket level. Enforced by: orchestrator.js.
 
-**Layer 2 — Prompt**: BotManager inlines all data as plain text. Subagent prompts contain NO file paths, NO directory names, NO other bot names. Zero filesystem knowledge. Strategy docs inlined (not Read) by skill level. Enforced by: botmanager-prompt.md.
+**Layer 2 — Prompt**: BotManager inlines all data as plain text. Subagent prompts contain NO file paths, NO directory names, NO other bot names. Zero filesystem knowledge. Strategy docs inlined (not Read) by skill level. Enforced by: botmanager-init.md + botmanager-turn.md.
 
 **Layer 3 — Session**: CoachBot runs in main session (sees user's cards via bridge). Bot decisions run in separate `claude -p` sessions. User's cards never enter any bot's prompt. Enforced by: dual-session architecture.
 
@@ -78,19 +83,20 @@ PokerBot/
   README.md                 This file (Markdown version with Mermaid)
   game.json                 Active game config (ephemeral, delete = stop)
 
-  pokernow-bot/             Runtime engine
+  poker-server/             PRIMARY game backend (self-hosted)
+    poker-server.js         HTTP + WebSocket server (:3457)
+    lib/poker-engine.js     Pure game engine (deal, bet, showdown)
+    public/poker-table.html Browser UI (join, play, spectate)
+
+  pokernow-bot/             FALLBACK engine (pokernow.com)
     scripts/
       orchestrator.js       Multi-bot WebSocket manager
-      coach-bridge.js       Browser-injected CoachBot bridge
-      coach-server.js       HTTP bridge server (:3456)
-      botmanager.sh         Background bot decision loop
+      coach-ws.js           CoachBot WebSocket bridge
       decide.py             CLI action validator
     lib/
       poker-now.js          WebSocket client
       game-state.js         State parser
-    SKILL.md                Game flow (Enter Room, Add Bots, Stop)
-    COACH-BRIDGE.md         Bridge connection & API reference
-    BOTMANAGER.md           BotManager prompt, isolation rules
+    SKILL.md                Fallback game flow
 
   poker-agent/              GTO brain
     strategy/
@@ -104,7 +110,11 @@ PokerBot/
       range_parser.py       Internal
     SKILL.md                Tool manual
 
-  bot_profiles/             AI personalities
+  bot_profiles/             AI personalities + BotManager
+    botmanager.sh           Background bot decision loop
+    botmanager-init.md      Init prompt: load personality + strategy
+    botmanager-turn.md      Turn prompt: read state, decide, act, EXIT
+    BOTMANAGER.md           BotManager architecture & isolation rules
     .template/              Copy to create new bot
     CoachBot/               Observer GTO coach (opus)
     GTO_Grace/              Balanced pro (opus)
@@ -122,13 +132,14 @@ PokerBot/
 
 | Scenario | Trigger | Key docs loaded |
 |---|---|---|
-| A: 纯 Coaching | "AK怎么打" / "该不该call" | personality.md + SKILL.md + strategy × 5 |
-| B: 开游戏 | "来一局poker" / "加入房间" | pokernow-bot/SKILL.md + COACH-BRIDGE.md + (A files) |
-| C: 加 PlayBot | "加几个bot" / "让AI也来打" | BOTMANAGER.md + bot personality × N |
-| D: BotManager | botmanager.sh 自动 · 每2s | pending-turns.json + personality + turn.json + strategy (inline) |
+| A: Pure Coaching | "how to play AK" / "should I call" | personality.md + SKILL.md + strategy × 5 |
+| B: Start Game (self-hosted) | "play poker" | poker-server docs + (A files) |
+| B': Start Game (pokernow) | "join pokernow room" | pokernow-bot/SKILL.md + (A files) |
+| C: Add PlayBots | "add bots" / "let AI play too" | BOTMANAGER.md + bot personality × N |
+| D: BotManager | botmanager.sh auto · every 2s | pending-turns.json + personality + turn.json + strategy (inline) |
 
 **Authoritative file list**: `CLAUDE.md` → CoachBot Activation section.
 
 ---
 
-PokerBot · 3 subsystems · 6 bots · 5 strategy docs · 5 tools · 8 runtime scripts
+PokerBot · 4 subsystems · 6 bots · 5 strategy docs · 5 tools · self-hosted server

@@ -32,7 +32,7 @@ except:
 **If missing**: Tell user to install Node.js 18+ from https://nodejs.org
 **Cannot auto-install**: System-level dependency
 
-Features blocked without Node.js: ALL live game features (WebSocket, orchestrator, coach-bridge, coach-server). Only offline coaching (hand analysis, GTO teaching) works.
+Features blocked without Node.js: ALL live game features (poker-server, WebSocket, orchestrator). Only offline coaching (hand analysis, GTO teaching) works.
 
 ### Step 2: Python (Required — GTO Tools)
 
@@ -46,7 +46,7 @@ Features blocked without Python: ALL GTO calculations (equity, odds, preflop ran
 
 **Check**: `python3 -c "import numpy; print(numpy.__version__)"`
 **Install command**: `pip install numpy` (or `pip install numpy --break-system-packages` if needed)
-**Ask user**: "需要安装 numpy（equity 计算器依赖），可以吗？"
+**Ask user**: "Need to install numpy (required by equity calculator). OK?"
 
 Features blocked without numpy: equity.py (Monte Carlo equity calculator). Other tools (odds, preflop, evaluator) still work.
 
@@ -54,9 +54,14 @@ Features blocked without numpy: equity.py (Monte Carlo equity calculator). Other
 
 **Check**: `ls pokernow-bot/node_modules/.package-lock.json` (exists = installed)
 **Install command**: `cd pokernow-bot && npm install`
-**Ask user**: "需要运行 npm install 安装 WebSocket 等依赖（ws, dotenv, node-fetch），可以吗？"
+**Ask user**: "Need to run npm install for WebSocket and other dependencies. OK?"
 
-Packages installed: ws (WebSocket), dotenv (env config), node-fetch (HTTP client).
+Also install poker-server dependencies:
+```bash
+cd poker-server && npm install
+```
+
+Packages installed: ws (WebSocket), node-fetch (HTTP client). poker-server also uses ws + optional localtunnel.
 
 Features blocked without npm install: ALL live game connections.
 
@@ -70,27 +75,16 @@ Features blocked without npm install: ALL live game connections.
 
 Features blocked without claude CLI: BotManager cannot spawn subagents → PlayBots cannot make autonomous decisions. CoachBot coaching works fine.
 
-### Step 6: Claude in Chrome (Optional — Live CoachBot)
+### Step 6: botmanager.sh Permissions
 
-**Check**: Cannot auto-detect. Ask user:
-  "你有安装 Claude in Chrome 浏览器扩展吗？（CoachBot 实时看牌需要它来注入 bridge）"
-  - Yes → record as ok
-  - No → tell user: CoachBot live game bridging won't work. Offline coaching and PlayBots still work.
-  - Install: Chrome Web Store → "Claude in Chrome"
-**Cannot auto-install**: Browser extension
-
-Features blocked without Claude in Chrome: coach-bridge.js cannot be injected → CoachBot cannot read live game state. Offline coaching (你告诉我牌面我帮你分析) still works.
-
-### Step 7: botmanager.sh Permissions
-
-**Check**: `test -x pokernow-bot/scripts/botmanager.sh`
-**Fix command**: `chmod +x pokernow-bot/scripts/botmanager.sh`
+**Check**: `test -x bot_profiles/botmanager.sh`
+**Fix command**: `chmod +x bot_profiles/botmanager.sh`
 **Auto-fix**: Yes, no need to ask user (harmless operation).
 
-### Step 8: Port 3456 Availability
+### Step 7: Port 3457 Availability
 
-**Check**: `curl -s http://localhost:3456/ 2>&1` → should fail (port free) or show coach-server response (already running)
-**If occupied by another process**: Tell user port 3456 is in use, coach-server may fail to start.
+**Check**: `curl -s http://localhost:3457/ 2>&1` → should fail (port free) or show poker-server response (already running)
+**If occupied by another process**: Tell user port 3457 is in use, poker-server may fail to start. Can use `--port` flag to change.
 **Auto-fix**: No — just report.
 
 ## Setup Status File Format
@@ -107,9 +101,8 @@ After running all steps, write `setup-status.json`:
     "numpy": { "status": "ok", "version": "1.26.0" },
     "npm_install": { "status": "ok" },
     "claude_cli": { "status": "skip", "reason": "User declined — PlayBots unavailable" },
-    "chrome_extension": { "status": "ok" },
     "botmanager_chmod": { "status": "ok" },
-    "port_3456": { "status": "ok" }
+    "port_3457": { "status": "ok" }
   },
   "available_features": {
     "offline_coaching": true,
@@ -128,26 +121,27 @@ After setup, CC determines which features are available:
 
 | Feature | Requires |
 |---------|----------|
-| **Offline Coaching** (手动输入牌面分析) | Python + numpy |
-| **Live CoachBot — WebSocket** (终端模式，CC渲染牌桌) | Node.js + npm + Python + numpy |
-| **Live CoachBot — Chrome** (浏览器模式，用户在PokerNow操作) | Node.js + npm + Python + numpy + Chrome Extension |
-| **PlayBots** (AI 自主决策) | Node.js + npm + Python + claude CLI |
-| **Full System** (全部功能) | ALL of the above |
+| **Offline Coaching** (manual hand analysis) | Python + numpy |
+| **Self-Hosted Game** (browser UI) | Node.js + npm (poker-server) |
+| **Live CoachBot** (real-time GTO advice) | Node.js + npm + Python + numpy |
+| **PlayBots** (AI autonomous decisions) | Node.js + npm + Python + claude CLI |
+| **Public Game** (remote access) | Node.js + npm + localtunnel (`npm i localtunnel` in poker-server/) |
+| **Full System** | ALL of the above |
 
 CC should tell the user at the end of setup:
 
 ```
 ✅ Setup complete! Available features:
-  ✅ Offline Coaching — 告诉我牌面，我帮你 GTO 分析
-  ✅ Live CoachBot — 实时读牌 + 建议
-  ❌ PlayBots — 需要安装 claude CLI
+  ✅ Offline Coaching — describe a hand, I'll run GTO analysis
+  ✅ Live CoachBot — real-time card reading + advice
+  ❌ PlayBots — requires claude CLI
 
-Say "来一局poker" to start!
+Say "play poker" to start!
 ```
 
 ## Re-running Setup
 
-User can say "重新检查环境" / "re-run setup" / "check dependencies" to re-run all checks. CC should:
+User can say "re-run setup" / "check dependencies" to re-run all checks. CC should:
 1. Delete or ignore `setup-status.json`
 2. Re-run all steps from Step 1
 3. Write new `setup-status.json`
@@ -157,5 +151,5 @@ User can say "重新检查环境" / "re-run setup" / "check dependencies" to re-
 - **Always ask before installing**. Never silently run `pip install` or `npm install`.
 - **Record everything** in setup-status.json so next session doesn't re-ask.
 - **Be specific about what's blocked**. Don't just say "setup incomplete" — say exactly which features work and which don't.
-- **Don't block on optional deps**. If Claude in Chrome or claude CLI is missing, proceed with available features.
-- **.env GAME_URL is set later**. Don't ask user to manually edit .env — SKILL.md flow fills GAME_URL at game start.
+- **Don't block on optional deps**. If claude CLI or localtunnel is missing, proceed with available features.
+- **poker-server is the primary backend**. pokernow.com is fallback only — if poker-server works, no other dependencies needed for the game itself.

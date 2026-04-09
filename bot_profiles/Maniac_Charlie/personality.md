@@ -2,7 +2,7 @@
 
 ## Identity
 - **Name**: Maniac_Charlie
-- **Model**: sonnet
+- **Model**: haiku
 - **Use Tools**: no
 
 ## Character
