@@ -266,6 +266,10 @@ function handleServerMessage(msg) {
 
     case 'error':
       log.warn(`Server error: ${msg.message}`);
+      if (msg.message === 'Name taken' && upstream && upstream.readyState === 1) {
+        log.info('Attempting reconnect...');
+        upstream.send(JSON.stringify({ type: 'reconnect', name: CONFIG.name }));
+      }
       break;
   }
 }

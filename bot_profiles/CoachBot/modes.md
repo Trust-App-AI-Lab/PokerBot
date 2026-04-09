@@ -45,7 +45,7 @@ All three options support **text narration (always on) + browser preview (defaul
 ## 1 — 实战 / 3 — 教学
 
 实战和教学共用同一个启动流程，区别只是 coaching style（见 personality.md）。教学固定走 🅰（自己开桌 + Bot）。
-- A → Bot 选择流程（见下方） → CC auto-starts poker-server + poker-client.js (Mode 1, see CLAUDE.md) → 告知用户可以在浏览器打开 `localhost:3456` 查看牌桌（也可以说"关掉预览"关闭 relay）
+- A → Bot 选择流程（见下方） → CC auto-starts poker-server + poker-client.js (Mode 1, see CLAUDE.md) → 用 `preview_start` 打开 `http://localhost:3456` 展示牌桌（也可以说"关掉预览"关闭 preview）
 - B → user provides IP/URL, CC starts poker-client.js (Mode 2)
 - C → user provides pokernow link, CC starts coach-ws.js (Mode 3, fallback)
 
@@ -70,28 +70,28 @@ All three options support **text narration (always on) + browser preview (defaul
    ```
    CC 通过 `POST /config` 运行时更新（可配置字段：`turnTimeout`, `smallBlind`, `bigBlind`, `stack`），不需重启 server。
 
-3. Scan `bot_profiles/*/personality.md`（跳过 CoachBot 和 .template），读取每个 bot 的 Name、Style、Skill Level、一句话描述
-4. Show bot list (adapt language):
+3. Scan `bot_profiles/*/personality.md`（跳过 CoachBot 和 .template），读取每个 bot 的 Name、Style、Skill Level、一句话描述。**必须用 Glob 实际扫描目录，列出所有找到的 bot — 不要凭记忆或照搬示例。**
+4. Show bot list — 把扫描到的**全部** bot 列给用户（adapt language）:
 
-   **中文**:
+   **中文**（示例，实际内容从扫描结果动态生成）:
    ```
    🃏 CoachBot: 选几个 AI Bot？（2-5）
-   现有 bot：
+   现有 bot（共 N 个）：
      🦈 Shark_Alice — 紧凶 (TAG)，接近 GTO
      🐟 Fish_Bob — 松被动，爱 limp
      🔥 Maniac_Charlie — 超凶，疯狂 bluff
-     ...
+     ... ← 此处列出扫描到的所有 bot，不要省略
    直接说名字，或者 "随机2个" / "来3个不同风格的"
    也可以说 "新建一个" 自定义 bot
    ```
-   **English**:
+   **English** (example, actual content dynamically generated from scan):
    ```
    🃏 CoachBot: How many AI bots? (2-5)
-   Available bots:
+   Available bots (N total):
      🦈 Shark_Alice — Tight-aggressive (TAG), near-GTO
      🐟 Fish_Bob — Loose-passive, loves to limp
      🔥 Maniac_Charlie — Hyper-aggressive, wild bluffer
-     ...
+     ... ← list ALL scanned bots here, do not omit any
    Say their names, or "random 2" / "3 different styles"
    You can also say "create new" for a custom bot
    ```
@@ -118,7 +118,7 @@ bash start-game.sh --name <UserName> --bots "Shark_Alice,Fish_Bob"
 
 如果不需要 BotManager（纯人类玩家）：`bash start-game.sh --name <UserName> --no-botmanager`
 
-**注意**：start-game.sh 处理 server + relay + join + BotManager，但不处理 bot init（session预热）。CC 需要在 `start-game.sh` 之前或之后单独 init bot sessions（见下方）。用户打开 `localhost:3456` 即可在浏览器看牌桌。
+**注意**：start-game.sh 处理 server + relay + join + BotManager，但不处理 bot init（session预热）。CC 需要在 `start-game.sh` 之前或之后单独 init bot sessions（见下方）。CC 用 `preview_start` 展示牌桌，不要让用户自己开浏览器。
 
 ### Bot Init + Join 流程（CC 负责）
 
@@ -170,26 +170,21 @@ curl -s -X POST localhost:3457/join \
 
 ### 自动模式 (Auto-Play)
 
-用户说 "自动模式"、"帮我打N局"、"auto-play" → CoachBot 自动替用户打牌，同时以解说员风格播报每手牌。
+用户说 "自动模式"、"帮我打N局"、"auto-play" → CoachBot 自动替用户打牌。
 
-**实现方式**：CoachBot 进入 polling loop，每 2-3s `curl localhost:3456/state`，自动处理每手牌：
+**CoachBot 以 CoachBot 身份打牌和分析——遵循 personality.md 的 Coaching Rules 和 GTO Analysis Flow，自动模式不降低标准。**
 
-1. **获取状态** — `curl -s localhost:3456/state`
-2. **播报牌局** — 解说风格，描述场上情况
-3. **轮到用户** → 用 GTO 工具分析 → 展示推理过程 → 执行决策
-   - Preflop: `PYTHONIOENCODING=utf-8 py poker-agent/tools/preflop.py <card1> <card2> <position>`
-   - Postflop: `evaluator.py` + `equity.py` 评估手牌强度和胜率
-   - `curl -s -X POST localhost:3456/action` 执行决策
-4. **不是用户的回合** → 简要播报等待状态
-5. **手牌结束** → 总结结果和筹码变化
-6. 追踪已完成手数，达到目标后停止
+**流程**：
+1. Poll `localhost:3456/state`，等轮到用户
+2. 轮到用户 → 以 CoachBot 身份分析 + 执行决策
+3. 对手行动 → 简要播报
+4. 手牌结束 → 总结结果和筹码变化
+5. 追踪手数，达到目标后停止
 
-**关键点**：
-- CoachBot 是决策者（不是 bash 脚本），用完整 GTO 分析做决策
+**规则**：
 - 用户随时可以说话打断，CoachBot 响应后恢复自动模式
 - 用户回来后可以看对话记录里的完整决策过程
-
-**不要用** `bash auto-play.sh` 或 for 循环 — 那些是纯脚本决策，没有 CoachBot 的分析推理。
+- 不要用 `bash auto-play.sh` 或 for 循环 — CoachBot 自己就是决策者
 
 ### 1D — Text Mode (纯文字牌局)
 
@@ -257,12 +252,16 @@ Each hand flow (examples in both languages — pick the right one):
 
    **中文**:
    ```
-   🃏 CoachBot: 这手打得不错。AKo 在 BTN open 是标准操作 ⚙ preflop.py RAISE 100%。
+   🃏 CoachBot: 这手打得不错。Flop K♠7♥2♦ 我们 AK 顶对顶踢脚，对手 limp range 约 40%，
+   equity 72.3%，干燥牌面小额 c-bet $40 合理。Turn 3♣ 空白牌继续 barrel，EV +$45。
+   River 对手 fold，赢下 $180。
    继续下一手？(y / 换桌 / 退出)
    ```
    **English**:
    ```
-   🃏 CoachBot: Well played. AKo open from BTN is standard ⚙ preflop.py RAISE 100%.
+   🃏 CoachBot: Well played. Flop K♠7♥2♦ with AK — top pair top kicker, villain's limp
+   range ~40%, equity 72.3%, dry board small c-bet $40 makes sense. Turn 3♣ brick,
+   double barrel, EV +$45. Villain folds river, +$180.
    Next hand? (y / change table / quit)
    ```
 

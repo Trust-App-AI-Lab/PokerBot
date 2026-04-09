@@ -57,17 +57,8 @@ Two game backends, three connection modes, one unified relay layer:
 
 **CC always reads/writes via localhost:3456**, regardless of which backend is running. This is the single invariant.
 
-## First Run Setup
-
-On first poker-related interaction, check if `setup-status.json` exists:
-- **Exists** → Read it, check `available_features`, proceed accordingly.
-- **Missing** → Read `SETUP.md` and run the interactive setup flow. Ask user before each install step. Write `setup-status.json` when done.
-
-User can say "重新检查环境" / "re-run setup" / "check dependencies" to re-run setup.
-
 ## Key Skills
 
-- `SETUP.md` — First run setup: dependency checks, interactive install, feature availability matrix. **Read this on first run (when setup-status.json doesn't exist).**
 - `poker-server/` — **PRIMARY game backend**. Self-hosted Texas Hold'em server. `node poker-server.js` starts HTTP + WebSocket server on :3457. Browser players connect directly. CC connects via poker-client.js.
 - `poker-server/poker-client.js` — **CC's universal relay**. Connects upstream to any poker-server (local or remote), serves `localhost:3456` for CC to read/write, writes per-session history to `history/` dir. CC always auto-starts this.
 - `bot_profiles/BOTMANAGER.md` — **LLM bot engine**. `botmanager.sh` polls server, `claude -p` makes decisions per bot using personality.md + strategy docs. Pure HTTP (no WebSocket needed for bots).
@@ -107,6 +98,10 @@ User can say "重新检查环境" / "re-run setup" / "check dependencies" to re-
 
 ## Critical Rules
 
+### Bash 命令规范
+- **使用相对路径** — 所有 bash/node 命令必须用相对路径（如 `bash start-game.sh`，不要用 `bash C:/full/path/start-game.sh`），否则不匹配 `.claude/settings.local.json` 的权限规则，用户会被反复弹窗确认。
+- **单一命令** — 每次 Bash 调用只执行一条命令，不要用 `&&`、`&`、`;`、`|` 串联多条命令。需要多条命令时分开调用。
+
 ### Dual-Session Architecture
 Main session (= CoachBot) handles user interaction and coaching. BotManager runs as a background process (`bot_profiles/botmanager.sh` + `claude -p`) and handles all play bot decisions autonomously. In poker-server mode, BotManager communicates directly via HTTP API (no intermediate files needed). In pokernow fallback mode, they communicate via shared JSON files. Never try to run bot decisions in the main session — it blocks user conversation.
 
@@ -131,7 +126,7 @@ CC auto-starts the appropriate relay. **Ask user for their in-game name before s
 node poker-server/poker-server.js &                              # game server on :3457
 node poker-server/poker-client.js ws://localhost:3457 --name <UserName> --port 3456 &  # relay on :3456
 
-# User opens http://localhost:3456 in browser to play (NOT :3457)
+# CC uses preview_start to show http://localhost:3456 (NOT :3457)
 # CC reads/writes via http://localhost:3456/state (sees user's cards)
 
 # Join bots via HTTP (one per bot profile):
@@ -147,7 +142,7 @@ bash bot_profiles/botmanager.sh &
 ```bash
 # CC starts this automatically (user provides the server URL):
 node poker-server/poker-client.js ws://friend:3457 --name <UserName> --port 3456 &
-# User opens http://localhost:3456 in browser (relayed view)
+# CC uses preview_start to show http://localhost:3456 (relayed view)
 # CC reads/writes via http://localhost:3456
 ```
 
@@ -264,8 +259,8 @@ Unified event-based JSONL format used by all writers (poker-server, poker-client
 | "结束游戏" / "stop game" | Stop poker-server + poker-client.js processes → confirm |
 | "别给我建议了" / "stop giving advice" | Toggle off auto-advice; only analyze when user asks |
 | "关掉预览" / "no preview" | Stop poker-client.js relay, no browser UI — CC polls upstream directly, lighter resource usage |
-| "打开预览" / "open preview" | Start relay, user opens :3456 in browser |
+| "打开预览" / "open preview" | Start relay, CC uses `preview_start` to show :3456 |
 | Any poker advice keyword (see trigger list) | Activate CoachBot if not already loaded, run GTO Analysis Flow |
-| "重新检查环境" / "re-run setup" / "check dependencies" | Read `SETUP.md` → re-run all checks → update `setup-status.json` |
+| "重新检查环境" / "re-run setup" / "check dependencies" | Read `SETUP.md` → run dependency checks |
 | "开公网" / "public game" | `node poker-server.js --public` → localtunnel URL for remote players |
 | "回顾牌局" / "review hands" / "analyze history" | `curl localhost:3456/history?sessions` → list sessions → user picks one → read that session |

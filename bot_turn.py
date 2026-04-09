@@ -42,11 +42,16 @@ if len(cards) == 2:
     s2 = suited(cards[0], cards[1])
     paired = is_pair(cards[0], cards[1])
 
-    if phase == "preflop":
+    if phase == "waiting":
+        print("waiting phase — no action needed")
+        import sys; sys.exit(0)
+    elif phase == "preflop":
         # TT+, AK, AQ = premium
         is_premium = (paired and hi >= 8) or (hi == 12 and lo >= 10)
-        # 77-99, suited broadways, suited aces, KQo, KJo, QJo = strong
-        is_strong = (paired and hi >= 5) or (s2 and hi >= 10 and lo >= 7) or (s2 and hi == 12 and lo >= 7) or (hi >= 11 and lo >= 9)
+        # 77-99, suited broadways, suited aces, KQo-KTo, QJo, ATo+ = strong
+        is_strong = (paired and hi >= 5) or (s2 and hi >= 10 and lo >= 7) or \
+                    (s2 and hi == 12 and lo >= 7) or (hi >= 11 and lo >= 9) or \
+                    (hi == 12 and lo >= 8)
         # BTN/CO playable: suited connectors, suited kings, any pair, broadways
         is_playable = s2 or paired or (hi >= 10 and lo >= 8)
 
@@ -74,7 +79,7 @@ if len(cards) == 2:
                 action = dict(player=BOT, action="raise", amount=three_bet)
             elif is_strong and pot_odds < 0.30:
                 action = dict(player=BOT, action="call")
-            elif is_playable and pot_odds < 0.20 and pos == "BTN":
+            elif is_playable and pot_odds < 0.25 and pos in ("BTN", "BB"):
                 action = dict(player=BOT, action="call")
             else:
                 action = dict(player=BOT, action="fold")
@@ -88,13 +93,17 @@ if len(cards) == 2:
         has_pair = paired
         hits_top_pair = any(rank(c) == hi for c in board) and not paired
         hits_pair = any(rank(c) == hi or rank(c) == lo for c in board) and not paired
-        has_flush_draw = s2 and sum(1 for c in board if c[-1] == cards[0][-1]) >= 2
-        has_nut_flush_draw = s2 and hi == 12 and sum(1 for c in board if c[-1] == cards[0][-1]) >= 2
+        suited_suit = cards[0][-1] if s2 else None
+        board_suited_count = sum(1 for c in board if c[-1] == suited_suit) if s2 else 0
+        has_flush = s2 and board_suited_count >= 3
+        has_flush_draw = s2 and board_suited_count == 2
+        has_nut_flush = has_flush and hi == 12
+        has_nut_flush_draw = s2 and hi == 12 and board_suited_count == 2
 
         # Classify hand strength
-        # Strong: top pair top kicker, overpair, two pair+, nut flush draw
-        is_strong_hand = has_pair or hits_top_pair or has_nut_flush_draw
-        # Decent: middle pair, pair+draw, flush draw
+        # Strong: top pair top kicker, overpair, made flush, nut flush draw
+        is_strong_hand = has_pair or hits_top_pair or has_flush or has_nut_flush_draw
+        # Decent: middle pair, flush draw
         is_decent_hand = hits_pair or has_flush_draw
 
         if call_amt == 0:
