@@ -1,0 +1,1146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PokerBot — Live Table</title>
+<style>
+  /* ── Design canvas: 640×960 (portrait), scaled by JS to fit viewport ── */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: #0a0e1a; color: #e2e8f0;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    width: 100%; height: 100%; overflow: hidden;
+  }
+
+  /* Scaler wrapper — JS sets transform: scale(N) on this */
+  #scaler {
+    width: 640px; height: 690px;
+    transform-origin: top left;
+    position: absolute; top: 0; left: 0;
+  }
+
+  /* ── Badges ── */
+  .phase-badge {
+    display: inline-block; padding: 3px 10px; border-radius: 14px;
+    font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+  }
+  .your-turn-badge {
+    background: #dc2626; color: #fff; padding: 3px 10px; border-radius: 14px;
+    font-size: 11px; font-weight: 700; letter-spacing: 1px;
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+  /* ── Left info panel (phase + timer + log) ── */
+  .left-panel {
+    position: absolute; left: 4px; top: 0; bottom: 0;
+    width: 155px;
+    display: flex; flex-direction: column;
+  }
+  .left-panel .log-area {
+    position: absolute; top: 10px;
+    width: 100%;
+  }
+  .left-status {
+    position: absolute; bottom: 10px;
+    display: flex; flex-direction: column; gap: 5px; align-items: flex-start;
+    width: 100%;
+  }
+  .left-panel .status-badges {
+    display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+  }
+
+
+  /* ── Table area ── */
+  .table-container {
+    position: relative; width: 100%; height: 620px;
+    display: flex; align-items: center; justify-content: flex-end;
+    padding-right: 16px;
+  }
+  .table-body {
+    position: relative; width: 460px; height: 600px;
+  }
+  /* Layer 1: Outer rail (dark padded armrest) */
+  .table-rail {
+    position: absolute; inset: 0; border-radius: 24px;
+    background: linear-gradient(180deg, #3a3a3a 0%, #222 30%, #1a1a1a 70%, #2a2a2a 100%);
+    border: 3px solid #444;
+    box-shadow: 0 4px 30px rgba(0,0,0,0.7), inset 0 1px 3px rgba(255,255,255,0.08);
+  }
+  /* Layer 2: Grey felt border */
+  .felt-border {
+    position: absolute; inset: 10px; border-radius: 18px;
+    background: #7a7a72;
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.3);
+  }
+  /* Layer 3: Green felt playing surface */
+  .felt-outer {
+    position: absolute; inset: 18px; border-radius: 14px;
+    background: radial-gradient(ellipse at 50% 45%, #2d8c3e 0%, #1e7a2e 40%, #176424 70%, #125a1e 100%);
+    box-shadow: inset 0 0 30px rgba(0,0,0,0.25);
+  }
+  /* Layer 4: Center board area (lighter green) — community cards go here */
+  .felt {
+    position: absolute; inset: 170px 55px; border-radius: 45px;
+    background: radial-gradient(ellipse at 50% 45%, #35a050 0%, #2d8c3e 50%, #258535 100%);
+    border: 2px solid rgba(255,255,255,0.25);
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.15);
+  }
+  .board-label {
+    position: absolute; left: 50%; bottom: 22%; transform: translateX(-50%);
+    font-size: 11px; font-weight: 700; letter-spacing: 3px; color: rgba(255,255,255,0.2);
+    z-index: 7; white-space: nowrap;
+  }
+
+  /* ── Zone divider lines on felt ── */
+  .zone-lines {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    z-index: 4; pointer-events: none;
+  }
+
+  /* ── Pot ── */
+  .pot-area {
+    position: absolute; left: 50%; top: 28%; transform: translate(-50%,-50%);
+    text-align: center; z-index: 8;
+  }
+  .pot-box {
+    background: rgba(0,0,0,0.5); backdrop-filter: blur(4px);
+    border-radius: 12px; padding: 4px 20px; border: 1px solid rgba(255,255,255,0.1);
+  }
+  .pot-label { font-size: 11px; color: #5eead4; font-weight: 600; letter-spacing: 1px; }
+  .pot-value { font-size: 26px; font-weight: 800; color: #fbbf24; }
+
+  /* ── Community cards ── */
+  .community {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    display: flex; gap: 4px; z-index: 8; flex-wrap: wrap; justify-content: center;
+    max-width: 220px;
+  }
+
+  /* ── Card ── */
+  .card {
+    width: 58px; height: 82px; border-radius: 7px;
+    background: linear-gradient(160deg, #fff 0%, #f1f5f9 100%);
+    border: 1.5px solid #cbd5e1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15); user-select: none;
+  }
+  .card-small { width: 38px; height: 54px; border-radius: 5px; }
+  .card-small .card-rank { font-size: 13px; }
+  .card-small .card-suit { font-size: 17px; }
+  .card-hero { width: 52px; height: 74px; border-radius: 6px; }
+  .card-hero .card-rank { font-size: 18px; }
+  .card-hero .card-suit { font-size: 24px; }
+  .card-rank { font-size: 20px; font-weight: 700; line-height: 1; letter-spacing: -0.5px; }
+  .card-suit { font-size: 26px; line-height: 1; margin-top: -2px; }
+  .card-back {
+    background: linear-gradient(135deg, #1e40af 0%, #3b82f6 50%, #1e40af 100%);
+    border: 2px solid #93c5fd;
+  }
+  .card-back-inner {
+    width: 44px; height: 66px; border-radius: 5px;
+    border: 1px solid #60a5fa;
+    background: repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(255,255,255,0.05) 3px, rgba(255,255,255,0.05) 6px);
+  }
+  .card-small .card-back-inner {
+    width: 28px; height: 40px; border-radius: 4px;
+  }
+  .card-empty {
+    width: 58px; height: 82px; border-radius: 7px;
+    border: 1.5px dashed rgba(255,255,255,0.15); opacity: 0.4;
+  }
+
+  /* ── Player seat ── */
+  .player-seat {
+    position: absolute; transform: translate(-50%,-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    transition: opacity 0.3s; z-index: 5;
+  }
+  .player-seat.hero { z-index: 10; }
+  .player-seat.folded { opacity: 0.4; }
+  .player-chip {
+    border-radius: 10px; padding: 5px 10px; text-align: center; min-width: 80px;
+  }
+  .player-chip.hero-chip {
+    background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+    border: 2px solid #60a5fa;
+    box-shadow: 0 0 12px rgba(59,130,246,0.4);
+  }
+  .player-chip.other-chip {
+    background: linear-gradient(135deg, #334155 0%, #475569 100%);
+    border: 1.5px solid #64748b;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  }
+  .player-name {
+    font-size: 13px; font-weight: 700; color: #fff;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px;
+  }
+  .player-stack { font-size: 12px; color: #94a3b8; font-weight: 600; }
+  .player-bet {
+    background: #fbbf24; color: #1e293b; border-radius: 12px;
+    padding: 2px 10px; font-size: 12px; font-weight: 700;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+  .fold-tag {
+    display: inline-block; padding: 3px 12px; border-radius: 14px;
+    font-size: 13px; font-weight: 700; letter-spacing: 0.5px;
+    background: #64748b20; border: 1.5px solid #64748b60; color: #94a3b8;
+  }
+  .action-tag {
+    display: inline-block; padding: 3px 12px; border-radius: 14px;
+    font-size: 13px; font-weight: 700; letter-spacing: 0.5px;
+  }
+  .action-tag.action-raise, .action-tag.action-bet {
+    background: #f59e0b20; border: 1.5px solid #f59e0b60; color: #f59e0b;
+  }
+  .action-tag.action-call {
+    background: #3b82f620; border: 1.5px solid #3b82f660; color: #3b82f6;
+  }
+  .action-tag.action-check {
+    background: #10b98130; border: 1.5px solid #10b98160; color: #10b981;
+  }
+  .action-tag.action-allin {
+    background: #fbbf2430; border: 1.5px solid #fbbf2460; color: #fbbf24;
+  }
+  .pos-badge {
+    position: absolute; top: -6px; left: -6px;
+    padding: 1px 5px; border-radius: 4px;
+    font-size: 9px; font-weight: 800; letter-spacing: 0.5px;
+    z-index: 20;
+  }
+  .pos-btn { background: #fff; color: #1e293b; border: 1.5px solid #e2e8f0; }
+  .pos-sb { background: #3b82f6; color: #fff; border: 1.5px solid #60a5fa; }
+  .pos-bb { background: #f59e0b; color: #1e293b; border: 1.5px solid #fbbf24; }
+
+  /* ── Action log ── */
+  .log-area {
+    width: 100%;
+  }
+  .log-box {
+    background: rgba(15,23,42,0.85); border-radius: 8px; padding: 6px 8px;
+    border: 1px solid #1e293b; max-height: 300px; overflow-y: auto;
+    backdrop-filter: blur(4px);
+  }
+  .log-title { font-size: 9px; color: #475569; font-weight: 700; margin-bottom: 3px; letter-spacing: 1px; }
+  .log-entry { font-size: 11px; line-height: 1.5; }
+  .log-actor { font-weight: 600; }
+
+  /* ── Status bar ── */
+  .status-bar {
+    margin-top: 12px; font-size: 10px; color: #475569;
+    display: flex; gap: 16px; align-items: center; justify-content: center;
+  }
+  .status-dot {
+    width: 6px; height: 6px; border-radius: 50%; display: inline-block;
+    margin-right: 4px;
+  }
+  .status-dot.connected { background: #22c55e; }
+  .status-dot.disconnected { background: #ef4444; }
+
+  /* ── Connection overlay ── */
+  .connecting-overlay {
+    position: absolute; inset: 0; width: 640px; height: 690px;
+    background: rgba(10,14,26,0.95);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 100;
+  }
+  .connecting-text { font-size: 18px; color: #94a3b8; margin-top: 16px; }
+  .spinner {
+    width: 40px; height: 40px; border: 3px solid #334155;
+    border-top-color: #3b82f6; border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .hidden { display: none !important; }
+
+  /* ── Spectator mode (relay — actions via CC only) ── */
+  .spectator-mode .ctrl-sitout,
+  .spectator-mode .ctrl-rebuy,
+  .spectator-mode .ctrl-leave,
+  .spectator-mode .ctrl-sep,
+  .spectator-mode .ctrl-start,
+  .spectator-mode .ctrl-pause,
+  .spectator-mode .ctrl-settings,
+  .spectator-mode .kick-btn,
+  .spectator-mode .settings-panel { display: none !important; }
+  .available-actions {
+    display: flex; flex-direction: column; gap: 4px; padding: 2px 0; align-items: flex-start;
+  }
+  .act-badge {
+    display: inline-block; padding: 3px 10px; border-radius: 14px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+  }
+  .cc-banner-mini {
+    display: none; padding: 4px 8px; margin-top: 4px;
+    background: #7c3aed30; border: 1.5px solid #7c3aed60;
+    border-radius: 14px; font-size: 9px; font-weight: 700; color: #a78bfa;
+    letter-spacing: 0.3px; white-space: nowrap;
+  }
+  .spectator-mode .cc-banner-mini.visible { display: block; }
+
+  /* ── Control bar ── */
+  .control-bar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 4px 16px; width: 640px;
+  }
+  .control-left { display: flex; align-items: center; gap: 12px; }
+  .control-right { display: flex; align-items: center; gap: 6px; }
+  .ctrl-btn {
+    padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: 600;
+    cursor: pointer; border: 1px solid #475569; background: #1e293b; color: #94a3b8;
+    transition: all 0.15s;
+  }
+  .ctrl-btn:hover { border-color: #64748b; color: #e2e8f0; background: #334155; }
+  .ctrl-start { border-color: #22c55e40; color: #22c55e; }
+  .ctrl-start:hover { background: #22c55e20; border-color: #22c55e; }
+  .ctrl-pause { border-color: #f59e0b40; color: #f59e0b; }
+  .ctrl-pause:hover { background: #f59e0b20; border-color: #f59e0b; }
+  .ctrl-sitout { border-color: #64748b40; color: #94a3b8; }
+  .ctrl-rebuy { border-color: #3b82f640; color: #3b82f6; }
+  .ctrl-rebuy:hover { background: #3b82f620; border-color: #3b82f6; }
+  .ctrl-leave { border-color: #ef444440; color: #ef4444; }
+  .ctrl-leave:hover { background: #ef444420; border-color: #ef4444; }
+  .ctrl-settings { border-color: #a855f740; color: #a855f7; }
+  .ctrl-settings:hover { background: #a855f720; border-color: #a855f7; }
+  .ctrl-sep { color: #334155; font-size: 14px; margin: 0 2px; }
+
+  .paused-badge {
+    background: #f59e0b; color: #1e293b; padding: 3px 12px; border-radius: 20px;
+    font-size: 11px; font-weight: 700; letter-spacing: 1px;
+    animation: pulse 1.5s infinite;
+  }
+
+  /* ── Turn timer bar (left panel) ── */
+  .turn-timer {
+    width: 140px; height: 5px; background: #1e293b; border-radius: 3px; overflow: hidden;
+  }
+  /* ── Player-level turn timer ── */
+  .player-timer {
+    width: 100%; height: 4px; background: #1e293b80; border-radius: 2px; overflow: hidden; margin-top: 3px;
+  }
+  .turn-timer-bar, .player-timer-bar {
+    height: 100%; background: #22c55e; border-radius: 3px; width: 100%;
+  }
+  .turn-timer-bar.animating, .player-timer-bar.animating {
+    animation: timerShrink var(--timer-duration, 45s) linear forwards;
+  }
+  @keyframes timerShrink {
+    from { width: var(--timer-start, 100%); background: #22c55e; }
+    50% { background: #f59e0b; }
+    80% { background: #ef4444; }
+    to { width: 0%; background: #ef4444; }
+  }
+
+  /* ── Settings panel ── */
+  .settings-panel {
+    position: absolute; top: 40px; right: 20px; z-index: 50;
+    background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+    padding: 12px 16px; min-width: 200px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  .settings-title { font-size: 10px; color: #64748b; font-weight: 700; letter-spacing: 1px; margin-bottom: 8px; }
+  .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+  .settings-row label { font-size: 12px; color: #94a3b8; }
+  .settings-input {
+    width: 70px; padding: 4px 6px; border-radius: 4px; border: 1px solid #334155;
+    background: #0f172a; color: #e2e8f0; font-size: 12px; text-align: center;
+  }
+
+  /* ── Kick button on player seats ── */
+  .kick-btn {
+    position: absolute; top: -6px; right: -6px;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: #ef4444; border: none; color: #fff;
+    font-size: 10px; line-height: 18px; text-align: center;
+    cursor: pointer; display: none; z-index: 20;
+  }
+  .player-chip:hover .kick-btn { display: block; }
+
+  /* ── Sitting out dim ── */
+  .player-seat.sitting-out { opacity: 0.35; }
+  .sit-out-tag { font-size: 9px; color: #f59e0b; font-weight: 600; letter-spacing: 0.5px; }
+</style>
+</head>
+<body>
+
+<div id="scaler">
+
+<!-- Loading overlay -->
+<div id="connecting-overlay" class="connecting-overlay">
+  <div class="spinner"></div>
+  <div class="connecting-text">连接中...</div>
+</div>
+<div id="app" class="hidden">
+  <!-- ── Top Control Bar ── -->
+  <div class="control-bar">
+    <div class="control-left">
+      <span style="font-size:16px;font-weight:800;letter-spacing:-0.5px;background:linear-gradient(135deg,#dc2626,#f59e0b);-webkit-background-clip:text;-webkit-text-fill-color:transparent">♣ PokerBot</span>
+    </div>
+    <div class="control-right">
+      <button class="ctrl-btn ctrl-sitout" id="btn-sitout" onclick="toggleSitOut()">Sit Out</button>
+      <button class="ctrl-btn ctrl-rebuy" id="btn-rebuy" onclick="requestRebuy()">Rebuy</button>
+      <button class="ctrl-btn ctrl-leave" id="btn-leave" onclick="leaveTable()">Leave</button>
+      <span class="ctrl-sep">|</span>
+      <button class="ctrl-btn ctrl-start" id="btn-start" onclick="sendWS('start')">Start</button>
+      <button class="ctrl-btn ctrl-pause" id="btn-pause" onclick="togglePause()">Pause</button>
+      <button class="ctrl-btn ctrl-settings" id="btn-settings" onclick="toggleSettings()">Settings</button>
+    </div>
+  </div>
+
+  <!-- ── Settings Panel (hidden by default) ── -->
+  <div id="settings-panel" class="settings-panel hidden">
+    <div class="settings-title">TABLE SETTINGS</div>
+    <div class="settings-row">
+      <label>Small Blind</label>
+      <input id="set-sb" class="settings-input" type="number" min="1" value="10">
+    </div>
+    <div class="settings-row">
+      <label>Big Blind</label>
+      <input id="set-bb" class="settings-input" type="number" min="1" value="20">
+    </div>
+    <div class="settings-row">
+      <label>Auto-Start</label>
+      <input id="set-autostart" type="checkbox" checked>
+    </div>
+    <div class="settings-row">
+      <button class="ctrl-btn ctrl-start" onclick="applySettings()">Apply</button>
+      <button class="ctrl-btn ctrl-leave" onclick="toggleSettings()">Close</button>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="table-container">
+   <div class="table-body">
+    <div class="table-rail"></div>
+    <div class="felt-border"></div>
+    <div class="felt-outer"></div>
+    <div class="felt">
+      <div class="board-label">TEXAS HOLD'EM</div>
+    </div>
+    <!-- SVG overlay for player zone dividers -->
+    <svg id="zone-lines" class="zone-lines" viewBox="0 0 460 600" preserveAspectRatio="none"></svg>
+    <div class="pot-area">
+      <div class="pot-box">
+        <div class="pot-label">POT</div>
+        <div class="pot-value" id="pot-value">$0</div>
+      </div>
+    </div>
+    <div class="community" id="community-cards"></div>
+    <div id="player-seats"></div>
+   </div>
+   <!-- Left panel: action log (middle) + status (bottom) -->
+   <div class="left-panel">
+    <div class="log-area">
+      <div class="log-box">
+        <div class="log-title">ACTION LOG</div>
+        <div id="action-log"></div>
+      </div>
+    </div>
+    <div class="left-status">
+      <span id="phase-badge" class="phase-badge"></span>
+      <div id="turn-timer" class="turn-timer hidden">
+        <div id="turn-timer-bar" class="turn-timer-bar"></div>
+      </div>
+      <span id="turn-badge" class="your-turn-badge hidden">YOUR TURN</span>
+      <span id="paused-badge" class="paused-badge hidden">PAUSED</span>
+      <div id="available-actions" class="available-actions hidden"></div>
+      <div class="cc-banner-mini">Tell CoachBot Your Action</div>
+    </div>
+   </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <span><span id="status-dot" class="status-dot connected"></span> <span id="status-text">Connected</span></span>
+    <span id="last-update"></span>
+  </div>
+  <div style="text-align:center;font-size:9px;color:#334155;margin-top:2px;margin-bottom:30px;letter-spacing:0.3px">Powered by HKUST-GZ TAI Lab, PI Enyan Dai</div>
+</div>
+</div><!-- /scaler -->
+
+<script>
+// ══════════════════════════════════════════════════
+// CONFIG
+// ══════════════════════════════════════════════════
+const SUIT_MAP = { h: '♥', d: '♦', c: '♣', s: '♠' };
+const SUIT_COLOR = { h: '#ef4444', d: '#3b82f6', c: '#16a34a', s: '#1e293b' };
+const RANK_MAP = { T: '10', J: 'J', Q: 'Q', K: 'K', A: 'A' };
+const PHASE_STYLES = {
+  preflop:  { label: 'PREFLOP',  color: '#f59e0b', bg: '#451a03' },
+  flop:     { label: 'FLOP',     color: '#10b981', bg: '#052e16' },
+  turn:     { label: 'TURN',     color: '#3b82f6', bg: '#172554' },
+  river:    { label: 'RIVER',    color: '#ef4444', bg: '#450a0a' },
+  showdown: { label: 'SHOWDOWN', color: '#a855f7', bg: '#3b0764' },
+  waiting:  { label: 'WAITING',  color: '#64748b', bg: '#1e293b' },
+};
+// Fixed 10-seat table — seats always exist, players fill specific seats
+// Coordinates are % within .table-body (420x600)
+const ALL_SEATS = [
+  {x:50, y:90},  // Seat 1:  bottom center (hero)
+  {x:82, y:78},  // Seat 2:  bottom right
+  {x:90, y:58},  // Seat 3:  right lower
+  {x:90, y:38},  // Seat 4:  right upper
+  {x:75, y:14},  // Seat 5:  top right
+  {x:50, y:10},  // Seat 6:  top center
+  {x:25, y:14},  // Seat 7:  top left
+  {x:10, y:38},  // Seat 8:  left upper
+  {x:10, y:58},  // Seat 9:  left lower
+  {x:18, y:78},  // Seat 10: bottom left
+];
+
+// Which seats to use for N players (hero always seat 0, others spread out)
+const SEAT_MAP = {
+  2:  [0, 5],
+  3:  [0, 3, 7],
+  4:  [0, 3, 5, 8],
+  5:  [0, 2, 4, 6, 8],
+  6:  [0, 2, 4, 5, 7, 9],
+  7:  [0, 1, 3, 4, 6, 7, 9],
+  8:  [0, 1, 2, 4, 5, 6, 8, 9],
+  9:  [0, 1, 2, 3, 5, 6, 7, 8, 9],
+  10: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+};
+
+function getPositions(n) {
+  const map = SEAT_MAP[Math.min(Math.max(n, 2), 10)] || SEAT_MAP[6];
+  return map.map(i => ALL_SEATS[i]);
+}
+
+// Return which seat index (0-9) each player occupies
+function getSeatIndices(n) {
+  return SEAT_MAP[Math.min(Math.max(n, 2), 10)] || SEAT_MAP[6];
+}
+
+// ══════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════
+let ws = null;
+let myName = '';
+let myCards = [];
+let currentState = null;
+let isSittingOut = false;
+let isPaused = false;
+let turnTimerInterval = null;
+window._turnTimeout = 180000; // default, updated from /config
+
+// Fetch server config (turnTimeout etc.)
+fetch('/config').then(r => r.json()).then(cfg => {
+  if (cfg.turnTimeout) window._turnTimeout = cfg.turnTimeout;
+}).catch(() => {});
+
+// ══════════════════════════════════════════════════
+// WEBSOCKET CONNECTION
+// ══════════════════════════════════════════════════
+// Connects to whatever host served this page (poker-server:3457 or pokernow-bridge:3456)
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}`);
+
+  ws.onopen = () => {
+    console.log('WS connected');
+    document.getElementById('status-dot').className = 'status-dot connected';
+    document.getElementById('status-text').textContent = 'Connected';
+  };
+
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      handleMessage(msg);
+    } catch (err) {
+      console.warn('Failed to parse WS message:', err);
+    }
+  };
+
+  ws.onclose = () => {
+    document.getElementById('status-dot').className = 'status-dot disconnected';
+    document.getElementById('status-text').textContent = 'Disconnected — reconnecting...';
+    stopTurnTimerUI();
+    // Debounce reconnect — prevent multiple parallel connections
+    if (ws._reconnectTimer) clearTimeout(ws._reconnectTimer);
+    const savedName = myName;
+    ws._reconnectTimer = setTimeout(() => {
+      connectWS();
+      if (savedName) {
+        setTimeout(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'reconnect', name: savedName }));
+          }
+        }, 500);
+      }
+    }, 2000);
+  };
+
+  ws.onerror = () => {};
+}
+
+function handleMessage(msg) {
+  switch (msg.type) {
+    case 'welcome':
+      // Auto-join via relay name
+      if (msg.autoJoinName) {
+        document.body.classList.add('spectator-mode');
+        ws.send(JSON.stringify({ type: 'join', name: msg.autoJoinName }));
+      }
+      break;
+
+    case 'joined':
+      myName = msg.name;
+      document.getElementById('connecting-overlay').classList.add('hidden');
+      document.getElementById('app').classList.remove('hidden');
+      // Fetch full state (includes isMyTurn) to sync after reconnect
+      fetch('/state').then(r => r.json()).then(s => {
+        if (s && s.phase) { currentState = s; render(currentState); }
+      }).catch(() => {});
+      break;
+
+    case 'state':
+      currentState = msg.state;
+      scheduleRender(currentState);
+      break;
+
+    case 'cards':
+      myCards = msg.cards;
+      if (currentState) {
+        currentState.myCards = myCards;
+        scheduleRender(currentState);
+      }
+      break;
+
+    case 'your_turn':
+      // Merge turn info into state
+      if (currentState) {
+        currentState.isMyTurn = true;
+        currentState.callAmount = msg.callAmount;
+        currentState.minRaise = msg.minRaise;
+        currentState.maxRaise = msg.maxRaise;
+        currentState.turnDeadline = msg.turnDeadline;
+        render(currentState);
+      }
+      startTurnTimerUI(msg.turnDeadline);
+      // Audio ping
+      try { new AudioContext().resume(); } catch {}
+      break;
+
+    case 'hand_result':
+      stopTurnTimerUI();
+      showResults(msg);
+      break;
+
+    case 'player_joined':
+      addChatMessage('System', `${msg.name} joined the table`);
+      break;
+    case 'player_left':
+      addChatMessage('System', `${msg.name} left the table`);
+      break;
+    case 'player_busted':
+      addChatMessage('System', `${msg.name} is busted`);
+      break;
+    case 'player_rebuy':
+      addChatMessage('System', `${msg.name} rebuys for $${msg.amount} (stack: $${msg.newStack})`);
+      break;
+    case 'player_kicked':
+      addChatMessage('System', `${msg.name} was kicked from the table`);
+      break;
+    case 'player_sit_out':
+      addChatMessage('System', `${msg.name} is sitting out`);
+      break;
+    case 'player_sit_back':
+      addChatMessage('System', `${msg.name} is back`);
+      break;
+    case 'kicked':
+      alert(msg.message || 'You have been kicked');
+      location.reload();
+      break;
+    case 'game_paused':
+      isPaused = true;
+      addChatMessage('System', 'Game paused');
+      if (currentState) scheduleRender(currentState);
+      break;
+    case 'game_resumed':
+      isPaused = false;
+      addChatMessage('System', 'Game resumed');
+      if (currentState) scheduleRender(currentState);
+      break;
+    case 'settings_changed':
+      addChatMessage('System', `Settings: blinds ${msg.smallBlind}/${msg.bigBlind}, auto-start=${msg.autoStart}`);
+      break;
+
+    case 'chat':
+      addChatMessage(msg.player, msg.message);
+      break;
+
+    case 'error':
+      addChatMessage('Error', msg.message);
+      break;
+  }
+}
+
+// ══════════════════════════════════════════════════
+// ZONE DIVIDERS — draw lines from center to edges
+// ══════════════════════════════════════════════════
+function drawZoneLines() {
+  const svg = document.getElementById('zone-lines');
+  if (!svg) return;
+  const W = 460, H = 600;
+  const cx = W / 2, cy = H / 2;
+
+  // Always 10 seats — compute angle from center to each fixed seat
+  const angles = ALL_SEATS.map(p => Math.atan2(p.y / 100 * H - cy, p.x / 100 * W - cx));
+
+  // Inner rect (board area) and outer rect (felt edge)
+  const innerL = 68, innerR = W - 68, innerT = 150, innerB = H - 150;
+  const outerL = 16, outerR = W - 16, outerT = 16, outerB = H - 16;
+
+  function rayHit(l, t, r, b, cos, sin) {
+    let tMin = Infinity;
+    if (cos !== 0) {
+      let v = (l - cx) / cos; if (v > 0.01) tMin = Math.min(tMin, v);
+      v = (r - cx) / cos; if (v > 0.01) tMin = Math.min(tMin, v);
+    }
+    if (sin !== 0) {
+      let v = (t - cy) / sin; if (v > 0.01) tMin = Math.min(tMin, v);
+      v = (b - cy) / sin; if (v > 0.01) tMin = Math.min(tMin, v);
+    }
+    return { x: cx + cos * tMin, y: cy + sin * tMin };
+  }
+
+  let svgContent = '';
+  for (let i = 0; i < 10; i++) {
+    // Divider line between seat i and seat (i+1)
+    const a1 = angles[i], a2 = angles[(i + 1) % 10];
+    let mid = (a1 + a2) / 2;
+    if (Math.abs(a1 - a2) > Math.PI) mid += Math.PI;
+    const cos = Math.cos(mid), sin = Math.sin(mid);
+    const p1 = rayHit(innerL, innerT, innerR, innerB, cos, sin);
+    const p2 = rayHit(outerL, outerT, outerR, outerB, cos, sin);
+    svgContent += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>`;
+
+    // Seat number midway between inner and outer edges
+    const pCos = Math.cos(angles[i]), pSin = Math.sin(angles[i]);
+    const pi = rayHit(innerL, innerT, innerR, innerB, pCos, pSin);
+    const po = rayHit(outerL, outerT, outerR, outerB, pCos, pSin);
+    const tx = pi.x + (po.x - pi.x) * 0.5;
+    const ty = pi.y + (po.y - pi.y) * 0.5;
+    svgContent += `<text x="${tx}" y="${ty}" fill="rgba(255,255,255,0.18)" font-size="20" font-weight="800" text-anchor="middle" dominant-baseline="central">${i + 1}</text>`;
+  }
+  svg.innerHTML = svgContent;
+}
+
+// ══════════════════════════════════════════════════
+// CARD RENDERING
+// ══════════════════════════════════════════════════
+function cardHTML(code, size) {
+  // size: 'small' | 'hero' | 'full' (default)
+  if (!code || code.length < 2) return '';
+  const rank = RANK_MAP[code[0]] || code[0];
+  const suit = code[1].toLowerCase();
+  const cls = size === 'small' ? 'card card-small' : size === 'hero' ? 'card card-hero' : 'card';
+  return `<div class="${cls}">
+    <span class="card-rank" style="color:${SUIT_COLOR[suit]}">${rank}</span>
+    <span class="card-suit" style="color:${SUIT_COLOR[suit]}">${SUIT_MAP[suit]}</span>
+  </div>`;
+}
+function emptyCardHTML() { return '<div class="card-empty"></div>'; }
+
+// ══════════════════════════════════════════════════
+// RENDER STATE (throttled — max once per 300ms, skip if unchanged)
+// ══════════════════════════════════════════════════
+let _renderTimer = null;
+let _pendingState = null;
+let _lastStateHash = '';
+function scheduleRender(state) {
+  _pendingState = state;
+  if (!_renderTimer) {
+    _renderTimer = setTimeout(() => {
+      _renderTimer = null;
+      if (_pendingState) render(_pendingState);
+    }, 500);
+  }
+}
+function render(state) {
+  if (!state) return;
+  // Skip render if state unchanged (fast JSON hash)
+  const hash = JSON.stringify(state);
+  if (hash === _lastStateHash) return;
+  _lastStateHash = hash;
+
+  const app = document.getElementById('app');
+  app.classList.remove('hidden');
+
+  const phase = state.phase || 'waiting';
+  const pot = state.pot || 0;
+  const cards = state.myCards || myCards || [];
+  const community = state.communityCards || [];
+  const isMyTurn = state.isMyTurn || (myName && state.currentActor === myName) || false;
+  const ca = state.callAmount || 0;
+  const mnr = state.minRaise || 0;
+  const mxr = state.maxRaise || 0;
+  const players = state.players || [];
+  const actions = state.actions || [];
+  const posLabels = state.positions || {};
+  const dealerSeat = state.dealerSeat;
+
+  // Phase badge
+  const ps = PHASE_STYLES[phase] || PHASE_STYLES.waiting;
+  const badge = document.getElementById('phase-badge');
+  badge.textContent = ps.label;
+  badge.style.background = ps.bg;
+  badge.style.color = ps.color;
+  badge.style.border = `1px solid ${ps.color}40`;
+
+  // Turn badge + CoachBot prompt
+  document.getElementById('turn-badge').classList.toggle('hidden', !isMyTurn);
+  document.querySelector('.cc-banner-mini')?.classList.toggle('visible', isMyTurn);
+
+  // Pot
+  document.getElementById('pot-value').textContent = '$' + pot.toLocaleString();
+
+  // Community cards
+  const cc = document.getElementById('community-cards');
+  let ccHTML = community.map(c => cardHTML(c, 'full')).join('');
+  for (let i = community.length; i < 5; i++) ccHTML += emptyCardHTML();
+  cc.innerHTML = ccHTML;
+
+  // Players rendering — two modes:
+  // Lobby (waiting): bird's-eye view, all 10 seats shown, seat numbers visible
+  // Game (playing):  hero at bottom center, seat numbers hidden
+  const isLobby = phase === 'waiting';
+
+  if (isLobby) {
+    // ── Lobby mode: show all 10 seats ──
+    const seatMap = new Map(); // seat number → player
+    players.forEach(p => seatMap.set(p.seat, p));
+
+    document.getElementById('player-seats').innerHTML = ALL_SEATS.map((pos, i) => {
+      const p = seatMap.get(i);
+      if (p) {
+        const isHero = p.isMe;
+        const chipClass = isHero ? 'player-chip hero-chip' : 'player-chip other-chip';
+        return `<div class="player-seat ${isHero ? 'hero' : ''}" style="left:${pos.x}%;top:${pos.y}%">
+          <div class="${chipClass}" style="position:relative">
+            <span style="position:absolute;top:-8px;right:-8px;background:#475569;color:#cbd5e1;font-size:11px;font-weight:700;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center">${i + 1}</span>
+            <div class="player-name">${isHero ? '★ ' : ''}${escapeHTML(p.name)}</div>
+            <div class="player-stack">$${(p.stack || 0).toLocaleString()}</div>
+          </div>
+        </div>`;
+      } else {
+        return ''; // Empty seat — don't render
+      }
+    }).join('');
+  } else {
+    // ── Game mode: hero at bottom center ──
+    const heroIdx = players.findIndex(p => p.isMe);
+    const ordered = heroIdx >= 0
+      ? [...players.slice(heroIdx), ...players.slice(0, heroIdx)]
+      : players;
+    const positions = getPositions(Math.max(ordered.length, 2));
+
+    document.getElementById('player-seats').innerHTML = ordered.map((p, i) => {
+      const pos = positions[i];
+      const isHero = p.isMe;
+      const folded = p.folded;
+      const sitOut = p.sittingOut;
+      const hasCards = p.cards && p.cards.length > 0;
+      const inHand = !folded && !sitOut;
+      const classes = ['player-seat', isHero ? 'hero' : '', folded ? 'folded' : '', sitOut ? 'sitting-out' : ''].join(' ');
+      const chipClass = isHero ? 'player-chip hero-chip' : 'player-chip other-chip';
+
+      let html = `<div class="${classes}" style="left:${pos.x}%;top:${pos.y}%">`;
+      // Cards area
+      if (folded) {
+        html += `<div style="display:flex;gap:3px;margin-bottom:2px;opacity:0.35">`;
+        html += `<div class="card card-small card-back"><div class="card-back-inner"></div></div>`.repeat(2);
+        html += `</div>`;
+      } else if (hasCards) {
+        const cardSize = isHero ? 'hero' : 'small';
+        html += `<div style="display:flex;gap:4px;margin-bottom:2px">${p.cards.map(c => cardHTML(c, cardSize)).join('')}</div>`;
+      } else if (inHand) {
+        html += `<div style="display:flex;gap:3px;margin-bottom:2px">`;
+        html += `<div class="card card-small card-back"><div class="card-back-inner"></div></div>`.repeat(2);
+        html += `</div>`;
+      }
+      html += `<div class="${chipClass}" style="position:relative">`;
+      // Position badge (SB/BB/D) — no seat numbers in game mode
+      const pos2 = posLabels[p.name];
+      if (pos2 === 'SB') html += `<span class="pos-badge pos-sb">SB</span>`;
+      else if (pos2 === 'BB') html += `<span class="pos-badge pos-bb">BB</span>`;
+      else if (p.seat === dealerSeat) html += `<span class="pos-badge pos-btn">D</span>`;
+      // Kick button (only show on other players)
+      if (!isHero) {
+        html += `<div class="kick-btn" onclick="kickPlayer('${escapeHTML(p.name)}')">✕</div>`;
+      }
+      html += `<div class="player-name">${isHero ? '★ ' : ''}${escapeHTML(p.name || '?')}</div>
+        <div class="player-stack">$${(p.stack || 0).toLocaleString()}</div>
+      </div>`;
+      // Per-player turn timer
+      if (state.currentActor === p.name && state.turnDeadline > Date.now()) {
+        const total = window._turnTimeout || 180000;
+        const rem = Math.max(0, state.turnDeadline - Date.now());
+        const pct = (rem / total) * 100;
+        html += `<div class="player-timer"><div class="player-timer-bar animating" style="--timer-duration:${rem}ms;--timer-start:${pct}%"></div></div>`;
+      }
+      if (p.bet > 0 && !folded) {
+        const lastAct = [...(state.actions || [])].reverse().find(a => a.actor === p.name);
+        let actLabel = '';
+        if (lastAct) {
+          if (lastAct.action === 'small_blind') actLabel = 'SB ';
+          else if (lastAct.action === 'big_blind') actLabel = 'BB ';
+          else actLabel = lastAct.action.toUpperCase() + ' ';
+        }
+        html += `<div class="player-bet">${actLabel}$${p.bet}</div>`;
+      } else if (p.bet === 0 && !folded) {
+        const lastAct = [...(state.actions || [])].reverse().find(a => a.actor === p.name && a.action !== 'small_blind' && a.action !== 'big_blind');
+        if (lastAct && lastAct.action === 'check') {
+          html += `<div class="player-bet" style="background:#10b981">CHECK</div>`;
+        }
+      }
+      if (folded) {
+        html += `<div class="fold-tag">FOLD</div>`;
+      }
+      if (sitOut) html += `<div class="sit-out-tag">SITTING OUT</div>`;
+      html += '</div>';
+      return html;
+    }).join('');
+  }
+
+  // Available actions (display-only, user acts via CC chat)
+  const availEl = document.getElementById('available-actions');
+  if (isMyTurn) {
+    availEl.classList.remove('hidden');
+    const raiseMin = Math.max(mnr, 1);
+    const raiseMax = Math.max(mxr, raiseMin);
+    let html = '';
+    if (ca === 0) {
+      html += `<span class="act-badge" style="background:#10b98130;border:1.5px solid #10b98160;color:#10b981">check</span>`;
+      html += `<span class="act-badge" style="background:#64748b20;border:1.5px solid #64748b60;color:#64748b">fold</span>`;
+      html += `<span class="act-badge" style="background:#f59e0b20;border:1.5px solid #f59e0b60;color:#f59e0b">raise ${raiseMin}–${raiseMax}</span>`;
+    } else {
+      html += `<span class="act-badge" style="background:#3b82f620;border:1.5px solid #3b82f660;color:#3b82f6">call $${ca}</span>`;
+      html += `<span class="act-badge" style="background:#64748b20;border:1.5px solid #64748b60;color:#64748b">fold</span>`;
+      html += `<span class="act-badge" style="background:#f59e0b20;border:1.5px solid #f59e0b60;color:#f59e0b">raise ${raiseMin}–${raiseMax}</span>`;
+    }
+    availEl.innerHTML = html;
+  } else {
+    availEl.classList.add('hidden');
+  }
+
+  // Action log
+  const logEl = document.getElementById('action-log');
+  const recent = actions.slice(-10);
+  logEl.innerHTML = recent.map(a => {
+    const isRaise = a.action === 'raise' || a.action === 'bet';
+    const isFold = a.action === 'fold';
+    const isBlind = a.action === 'small_blind' || a.action === 'big_blind';
+    const color = isRaise ? '#fbbf24' : isFold ? '#64748b' : isBlind ? '#94a3b8' : '#94a3b8';
+    const actColor = isRaise ? '#f59e0b' : isFold ? '#475569' : '#64748b';
+    return `<div class="log-entry" style="color:${color}">
+      <span class="log-actor">${a.actor || '?'}</span>
+      <span style="color:${actColor}">${a.action}${a.amount ? ' $' + a.amount : ''}</span>
+    </div>`;
+  }).join('');
+
+  document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+
+  // Update paused state from server
+  if (state.paused !== undefined) isPaused = state.paused;
+
+  // Update sit-out state from own player data
+  const myPlayer = players.find(p => p.isMe);
+  if (myPlayer) isSittingOut = !!myPlayer.sittingOut;
+
+  // Left-panel timer: only show on MY turn (other players get on-avatar timer)
+  const newDeadline = state.turnDeadline || 0;
+  if (isMyTurn && newDeadline > Date.now() && newDeadline !== render._lastDeadline) {
+    render._lastDeadline = newDeadline;
+    startTurnTimerUI(newDeadline);
+  } else if (!isMyTurn || newDeadline <= Date.now()) {
+    render._lastDeadline = 0;
+    stopTurnTimerUI();
+  }
+
+  updateControlButtons();
+}
+
+// ══════════════════════════════════════════════════
+// RESULTS DISPLAY & HAND HISTORY
+// ══════════════════════════════════════════════════
+function showResults(msg) {
+  const results = (msg.results || []).map(r =>
+    `${r.winner} ${r.amount}${r.hand ? ' ' + r.hand : ''}`
+  );
+  const logEl = document.getElementById('action-log');
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+  div.style.color = '#fbbf24';
+  div.style.fontWeight = 'bold';
+  div.innerHTML = `<span style="color:#a78bfa">Hand #${msg.handNumber || '?'}</span> ${results.join(', ')}`;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function escapeHTML(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function addChatMessage(player, message) {
+  const logEl = document.getElementById('action-log');
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+  div.style.color = '#94a3b8';
+  div.innerHTML = `<span class="log-actor" style="color:#60a5fa">${escapeHTML(player)}</span>: ${escapeHTML(message)}`;
+  logEl.appendChild(div);
+  // Cap DOM entries to prevent memory growth
+  while (logEl.children.length > 50) logEl.removeChild(logEl.firstChild);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ══════════════════════════════════════════════════
+// VIEWPORT SCALING — fit 1280×720 canvas to any window size
+// ══════════════════════════════════════════════════
+const DESIGN_W = 640, DESIGN_H = 690;
+function fitScaler() {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  // Fit to both dimensions, center in viewport
+  const scale = Math.min(vw / DESIGN_W, vh / DESIGN_H);
+  const scaler = document.getElementById('scaler');
+  scaler.style.transform = `scale(${scale})`;
+  const offsetX = (vw - DESIGN_W * scale) / 2;
+  const offsetY = (vh - DESIGN_H * scale) / 2;
+  scaler.style.left = offsetX + 'px';
+  scaler.style.top = Math.max(0, offsetY) + 'px';
+}
+window.addEventListener('resize', fitScaler);
+fitScaler();
+// Retry scaling after layout settles (fixes preview panel initial size issue)
+setTimeout(fitScaler, 100);
+setTimeout(fitScaler, 500);
+
+// ══════════════════════════════════════════════════
+// GAME CONTROLS
+// ══════════════════════════════════════════════════
+
+function sendWS(type, data) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type, ...data }));
+  }
+}
+
+function toggleSitOut() {
+  if (isSittingOut) {
+    sendWS('sit_back');
+    isSittingOut = false;
+  } else {
+    sendWS('sit_out');
+    isSittingOut = true;
+  }
+  updateControlButtons();
+}
+
+function requestRebuy() {
+  const amount = prompt('Rebuy amount:', '1000');
+  if (amount && parseInt(amount) > 0) {
+    sendWS('rebuy', { amount: parseInt(amount) });
+  }
+}
+
+function leaveTable() {
+  if (confirm('Leave the table?')) {
+    sendWS('leave');
+    location.reload();
+  }
+}
+
+function togglePause() {
+  if (isPaused) {
+    sendWS('resume');
+  } else {
+    sendWS('pause');
+  }
+}
+
+function toggleSettings() {
+  const panel = document.getElementById('settings-panel');
+  panel.classList.toggle('hidden');
+  // Fill current values
+  if (currentState) {
+    document.getElementById('set-sb').value = currentState.smallBlind || 10;
+    document.getElementById('set-bb').value = currentState.bigBlind || 20;
+    document.getElementById('set-autostart').checked = currentState.autoStart !== false;
+  }
+}
+
+function applySettings() {
+  const sb = parseInt(document.getElementById('set-sb').value) || 10;
+  const bb = parseInt(document.getElementById('set-bb').value) || 20;
+  const autoStart = document.getElementById('set-autostart').checked;
+  sendWS('settings', { smallBlind: sb, bigBlind: bb, autoStart });
+  document.getElementById('settings-panel').classList.add('hidden');
+}
+
+function kickPlayer(name) {
+  if (confirm(`Kick ${name}?`)) {
+    sendWS('kick', { name });
+  }
+}
+
+function updateControlButtons() {
+  const btnSitout = document.getElementById('btn-sitout');
+  if (btnSitout) {
+    btnSitout.textContent = isSittingOut ? 'Sit Back' : 'Sit Out';
+    btnSitout.className = isSittingOut ? 'ctrl-btn ctrl-start' : 'ctrl-btn ctrl-sitout';
+  }
+  const btnPause = document.getElementById('btn-pause');
+  if (btnPause) {
+    btnPause.textContent = isPaused ? 'Resume' : 'Pause';
+  }
+  document.getElementById('paused-badge')?.classList.toggle('hidden', !isPaused);
+  // Show start button only when waiting
+  const btnStart = document.getElementById('btn-start');
+  if (btnStart && currentState) {
+    btnStart.style.display = currentState.phase === 'waiting' ? '' : 'none';
+  }
+}
+
+// ══════════════════════════════════════════════════
+// TURN TIMER UI
+// ══════════════════════════════════════════════════
+
+function startTurnTimerUI(deadline) {
+  stopTurnTimerUI();
+  if (!deadline) return;
+  const timerEl = document.getElementById('turn-timer');
+  const barEl = document.getElementById('turn-timer-bar');
+  timerEl.classList.remove('hidden');
+  const total = window._turnTimeout || 180000;
+  const remaining = Math.max(0, deadline - Date.now());
+  if (remaining <= 0) { stopTurnTimerUI(); return; }
+  const startPct = (remaining / total) * 100;
+  // Pure CSS animation — no setInterval needed
+  barEl.style.setProperty('--timer-duration', remaining + 'ms');
+  barEl.style.setProperty('--timer-start', startPct + '%');
+  barEl.classList.remove('animating');
+  void barEl.offsetWidth; // force reflow to restart animation
+  barEl.classList.add('animating');
+  // Auto-hide when done
+  turnTimerInterval = setTimeout(() => stopTurnTimerUI(), remaining);
+}
+
+function stopTurnTimerUI() {
+  if (turnTimerInterval) { clearTimeout(turnTimerInterval); turnTimerInterval = null; }
+  const timerEl = document.getElementById('turn-timer');
+  const barEl = document.getElementById('turn-timer-bar');
+  if (timerEl) timerEl.classList.add('hidden');
+  if (barEl) barEl.classList.remove('animating');
+}
+
+// ══════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════
+drawZoneLines(); // Static — only needs to run once
+connectWS();
+</script>
+</body>
+</html>

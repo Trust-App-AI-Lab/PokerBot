@@ -22,3 +22,16 @@ game.json
 pending-turns.json
 orchestrator-heartbeat.json
 orchestrator.pid
+
+# Runtime logs
+*.log
+bot_profiles/.botmanager.log
+bot_profiles/.botmanager.pid
+
+# Per-player history directories (runtime data)
+bot_profiles/*/history/
+bot_profiles/*/coach-ws.pid
+
+# Poker server runtime
+poker-server/history.jsonl
+poker-server/node_modules/
