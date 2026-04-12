@@ -1,3 +1,25 @@
+---
+name: PokerBot
+description: >
+  Multi-agent poker system — AI bots with distinct personalities play Texas Hold'em with real-time GTO coaching.
+  Use when user says "play poker", "开一局", "teach me poker", "review hands", or provides a pokernow.com link.
+author: EnyanDai
+version: 1.0.0
+tags:
+  - poker
+  - gto
+  - multi-agent
+  - coaching
+  - texas-holdem
+metadata:
+  openclaw:
+    requires:
+      bins:
+        - node
+        - npm
+        - python3
+---
+
 # Agents — Role Definitions & Architecture
 
 Three agent roles in the PokerBot system. Each has a clear responsibility boundary.
