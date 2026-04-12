@@ -1,5 +1,923 @@
 <!DOCTYPE html>
-<html>
-<head><meta http-equiv="refresh" content="0; url=README.html"></head>
-<body></body>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PokerBot — Multi-Agent Poker System</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f0f1f5;
+      --surface: #f8f9fb;
+      --surface-hover: #edeef2;
+      --border: #d8dbe2;
+      --border-hover: #bfc3cc;
+      --text: #1a1d23;
+      --text-secondary: #4b5563;
+      --text-muted: #6b7280;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --green: #16a34a;
+      --green-dim: rgba(22,163,74,0.08);
+      --orange: #d97706;
+      --purple: #7c3aed;
+      --red: #dc2626;
+      --tag-bg: rgba(37,99,235,0.06);
+      --tag-border: rgba(37,99,235,0.18);
+      --radius: 8px;
+      --radius-lg: 12px;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-hover); }
+
+    /* ── Background glow ── */
+    .bg-glow {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none;
+      z-index: -1;
+      overflow: hidden;
+    }
+    .bg-glow::before,
+    .bg-glow::after {
+      content: '';
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(100px);
+      opacity: 0.35;
+      animation: drift 20s ease-in-out infinite alternate;
+    }
+    .bg-glow::before {
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(37,99,235,0.3), transparent 70%);
+      top: -10%;
+      right: -5%;
+    }
+    .bg-glow::after {
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, rgba(124,58,237,0.25), transparent 70%);
+      bottom: 10%;
+      left: -8%;
+      animation-delay: -10s;
+    }
+    .bg-glow-extra {
+      position: absolute;
+      width: 400px;
+      height: 400px;
+      border-radius: 50%;
+      filter: blur(90px);
+      opacity: 0.2;
+      background: radial-gradient(circle, rgba(22,163,74,0.3), transparent 70%);
+      top: 40%;
+      left: 50%;
+      transform: translateX(-50%);
+      animation: drift2 25s ease-in-out infinite alternate;
+    }
+    @keyframes drift {
+      0%   { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(-40px, 30px) scale(1.1); }
+    }
+    @keyframes drift2 {
+      0%   { transform: translateX(-50%) translate(0, 0) scale(1); }
+      100% { transform: translateX(-50%) translate(30px, -40px) scale(1.15); }
+    }
+
+    /* ── Grid pattern overlay ── */
+    .bg-grid {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none;
+      z-index: -1;
+      background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+      background-size: 60px 60px;
+      opacity: 0.3;
+      mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, black 20%, transparent 70%);
+      -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, black 20%, transparent 70%);
+    }
+
+    /* ── Nav ── */
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: rgba(240,241,245,0.7);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 2rem;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+    }
+    .nav-logo {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.02em;
+    }
+    .nav-logo span { color: var(--accent); }
+    .nav-links { display: flex; gap: 0.25rem; margin-left: 1rem; }
+    .nav-links a {
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+      font-weight: 500;
+      padding: 0.4rem 0.75rem;
+      border-radius: 6px;
+      transition: all 0.15s;
+    }
+    .nav-links a:hover { color: var(--text); background: var(--surface); }
+    .nav-spacer { flex: 1; }
+
+    /* ── Hero ── */
+    .hero {
+      text-align: center;
+      padding: 4rem 1rem 2.5rem;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    .hero-badge {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--accent);
+      background: var(--tag-bg);
+      border: 1px solid var(--tag-border);
+      padding: 0.2rem 0.75rem;
+      border-radius: 20px;
+      margin-bottom: 1.25rem;
+    }
+    .hero h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin-bottom: 0.75rem;
+    }
+    .hero h1 em {
+      font-style: normal;
+      background: linear-gradient(135deg, var(--accent), var(--purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      color: var(--text-secondary);
+      font-size: 1.05rem;
+      max-width: 540px;
+      margin: 0 auto 1.5rem;
+    }
+    .hero-stats {
+      display: flex;
+      justify-content: center;
+      gap: 2rem;
+      margin-bottom: 1.5rem;
+    }
+    .hero-stat { text-align: center; }
+    .hero-stat-num {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .hero-stat-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .hero-actions {
+      display: flex;
+      justify-content: center;
+      gap: 0.75rem;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 0.55rem 1.25rem;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-hover); color: #fff; text-decoration: none; }
+    .btn-outline { background: transparent; color: var(--text-secondary); border-color: var(--border); }
+    .btn-outline:hover { color: var(--text); border-color: var(--border-hover); background: var(--surface); text-decoration: none; }
+
+    /* ── Container ── */
+    .container { max-width: 1080px; margin: 0 auto; padding: 0 1.5rem; }
+
+    /* ── Section ── */
+    .section { padding: 2.5rem 0; }
+    .section-title {
+      font-size: 1.3rem;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 0.4rem;
+    }
+    .section-hint {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      margin-bottom: 1.5rem;
+    }
+
+    /* ── Grid ── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 1.25rem;
+      transition: all 0.2s;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .card:hover {
+      border-color: var(--border-hover);
+      background: var(--surface-hover);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+    }
+    .card-top {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    .card-icon {
+      flex-shrink: 0;
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+    }
+    .card-name {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text);
+      flex: 1;
+    }
+    .card-badge {
+      font-size: 0.68rem;
+      font-weight: 600;
+      padding: 0.1rem 0.45rem;
+      border-radius: 4px;
+      color: #fff;
+    }
+    .card-desc {
+      font-size: 0.82rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+    .card-desc code {
+      font-size: 0.78rem;
+      background: var(--bg);
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+      color: var(--text-secondary);
+    }
+    .card-tags {
+      display: flex;
+      gap: 0.3rem;
+      flex-wrap: wrap;
+      margin-top: auto;
+      padding-top: 0.4rem;
+    }
+    .tag {
+      font-size: 0.68rem;
+      padding: 0.1rem 0.45rem;
+      border-radius: 4px;
+      background: var(--tag-bg);
+      color: var(--accent);
+      border: 1px solid var(--tag-border);
+    }
+
+    /* ── Bot Cards ── */
+    .bot-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 1.25rem;
+      display: flex;
+      gap: 1rem;
+      transition: all 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .bot-card:hover {
+      border-color: var(--border-hover);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+    }
+    .bot-avatar {
+      flex-shrink: 0;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    .bot-info { flex: 1; min-width: 0; }
+    .bot-name {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .bot-model {
+      display: inline-block;
+      font-size: 0.65rem;
+      font-weight: 600;
+      padding: 0.1rem 0.4rem;
+      border-radius: 4px;
+      margin-left: 0.5rem;
+      vertical-align: middle;
+    }
+    .bot-style {
+      font-size: 0.82rem;
+      color: var(--text-secondary);
+      margin-top: 0.2rem;
+    }
+    .bot-traits {
+      display: flex;
+      gap: 0.3rem;
+      flex-wrap: wrap;
+      margin-top: 0.4rem;
+    }
+
+    /* ── Steps ── */
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .step {
+      display: flex;
+      gap: 1rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 1rem 1.25rem;
+      transition: all 0.15s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .step:hover { border-color: var(--border-hover); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .step-num {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--tag-bg);
+      border: 1px solid var(--tag-border);
+      color: var(--accent);
+      font-size: 0.8rem;
+      font-weight: 700;
+      margin-top: 0.1rem;
+    }
+    .step-body { flex: 1; min-width: 0; }
+    .step-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 0.3rem;
+    }
+    .step-desc {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .step-desc code {
+      font-size: 0.78rem;
+      background: var(--bg);
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+      color: var(--text-secondary);
+    }
+    .step-prompt {
+      display: block;
+      margin-top: 0.5rem;
+      background: #f0f4ff;
+      border: 1px solid #c7d7fe;
+      border-radius: var(--radius);
+      padding: 0.5rem 0.75rem;
+      font-family: inherit;
+      font-size: 0.8rem;
+      font-style: italic;
+      color: var(--text-secondary);
+    }
+    .step-prompt::before {
+      content: 'Say \203A  ';
+      font-style: normal;
+      font-weight: 600;
+      font-size: 0.7rem;
+      color: var(--accent);
+    }
+
+    /* ── Architecture diagram ── */
+    .arch {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 0.5rem;
+      align-items: center;
+      max-width: 800px;
+      margin: 0 auto 1.5rem;
+    }
+    .arch-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 1rem;
+      text-align: center;
+    }
+    .arch-box-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 0.3rem;
+    }
+    .arch-box-port {
+      font-size: 0.72rem;
+      font-family: 'SF Mono', 'Cascadia Code', monospace;
+      color: var(--accent);
+      margin-bottom: 0.2rem;
+    }
+    .arch-box-desc {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .arch-arrow {
+      font-size: 1.2rem;
+      color: var(--text-muted);
+    }
+
+    /* ── Isolation layers ── */
+    .isolation {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .isolation-layer {
+      display: flex;
+      gap: 0.75rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.75rem 1rem;
+    }
+    .isolation-num {
+      flex-shrink: 0;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--purple);
+      min-width: 1.5rem;
+    }
+    .isolation-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .isolation-desc {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-top: 0.15rem;
+    }
+    .isolation-desc code {
+      font-size: 0.72rem;
+      background: var(--bg);
+      padding: 0.1rem 0.3rem;
+      border-radius: 4px;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      border-top: 1px solid var(--border);
+      padding: 2rem 1rem;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.78rem;
+    }
+    .footer a { color: var(--text-secondary); }
+
+    /* ── Responsive ── */
+    @media (max-width: 640px) {
+      .hero h1 { font-size: 1.75rem; }
+      .grid { grid-template-columns: 1fr; }
+      .grid-2 { grid-template-columns: 1fr; }
+      .nav { padding: 0 1rem; }
+      .nav-links { display: none; }
+      .hero-stats { gap: 1.25rem; }
+      .arch { grid-template-columns: 1fr; }
+      .arch-arrow { transform: rotate(90deg); text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Background effects -->
+<div class="bg-glow"><div class="bg-glow-extra"></div></div>
+<div class="bg-grid"></div>
+
+<!-- Nav -->
+<nav class="nav">
+  <div class="nav-logo">Poker<span>Bot</span></div>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#bots">Bots</a>
+    <a href="#quickstart">Quick Start</a>
+    <a href="https://github.com/nicekid1/PokerBot" target="_blank">GitHub</a>
+  </div>
+  <div class="nav-spacer"></div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-badge">Self-Hosted &middot; Multi-Agent &middot; Claude Code</div>
+  <h1><em>PokerBot</em></h1>
+  <p>AI bots with distinct personalities play Texas Hold'em against you. Self-hosted game server, GTO strategy engine, and live coaching &mdash; all powered by Claude.</p>
+  <div class="hero-stats">
+    <div class="hero-stat">
+      <div class="hero-stat-num">4</div>
+      <div class="hero-stat-label">Subsystems</div>
+    </div>
+    <div class="hero-stat">
+      <div class="hero-stat-num">6</div>
+      <div class="hero-stat-label">AI Bots</div>
+    </div>
+    <div class="hero-stat">
+      <div class="hero-stat-num">5</div>
+      <div class="hero-stat-label">GTO Tools</div>
+    </div>
+    <div class="hero-stat">
+      <div class="hero-stat-num">5</div>
+      <div class="hero-stat-label">Strategy Docs</div>
+    </div>
+  </div>
+  <div class="hero-actions">
+    <a class="btn btn-primary" href="#quickstart">Get Started</a>
+    <a class="btn btn-outline" href="https://github.com/nicekid1/PokerBot" target="_blank">View on GitHub</a>
+  </div>
+</section>
+
+<!-- Quick Start -->
+<section class="section" id="quickstart">
+  <div class="container">
+    <h2 class="section-title">Quick Start</h2>
+    <p class="section-hint">Prerequisites: Claude Code (CLI, desktop, or IDE) &middot; Node.js 18+ &middot; Python 3.10+</p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <div class="step-title">Clone &amp; install</div>
+          <div class="step-desc">
+            <code>git clone https://github.com/nicekid1/PokerBot.git</code><br>
+            <code>cd PokerBot/poker-server && npm install</code>
+          </div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <div class="step-title">Open Claude Code in PokerBot/</div>
+          <div class="step-desc">The CLAUDE.md file auto-loads everything. Just start talking.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <div class="step-title">Play!</div>
+          <div class="step-desc">Say any of these:</div>
+          <code class="step-prompt">"play poker" &mdash; start server, open browser UI</code>
+          <code class="step-prompt">"add bots" &mdash; add AI players to the table</code>
+          <code class="step-prompt">"create a new bot, aggressive old man who loves to bluff"</code>
+          <code class="step-prompt">"join pokernow.com/games/pglXXXXXX" &mdash; join external room</code>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <div class="step-title">Get coached</div>
+          <div class="step-desc">CoachBot is always active. Ask for GTO advice, hand analysis, or strategy tips mid-game. It reads your game state in real-time and responds in your language.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-body">
+          <div class="step-title">Stop</div>
+          <div class="step-desc">Say <code>"stop game"</code> and everything shuts down cleanly.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section class="section" id="features">
+  <div class="container">
+    <h2 class="section-title">Features</h2>
+    <p class="section-hint">Everything you need for a full AI poker experience.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="card-top">
+          <div class="card-icon" style="background:var(--tag-bg);color:var(--accent);">&#9824;</div>
+          <span class="card-name">Self-Hosted Server</span>
+        </div>
+        <div class="card-desc">Full Texas Hold'em engine running on localhost. HTTP + WebSocket on port 3457, browser UI for human players, API endpoints for bots. No external dependencies.</div>
+        <div class="card-tags">
+          <span class="tag">Node.js</span>
+          <span class="tag">WebSocket</span>
+          <span class="tag">Browser UI</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-top">
+          <div class="card-icon" style="background:rgba(124,58,237,0.08);color:var(--purple);">&#9830;</div>
+          <span class="card-name">Multi-Agent Bots</span>
+        </div>
+        <div class="card-desc">Six AI personalities from fish to pro, each with unique play styles, tells, and decision workflows. Create custom bots with natural language descriptions.</div>
+        <div class="card-tags">
+          <span class="tag">Opus</span>
+          <span class="tag">Sonnet</span>
+          <span class="tag">Haiku</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-top">
+          <div class="card-icon" style="background:var(--green-dim);color:var(--green);">&#9827;</div>
+          <span class="card-name">GTO Strategy Engine</span>
+        </div>
+        <div class="card-desc">Five strategy documents and five Python calculation tools. Equity calculator, pot odds, preflop charts, hand evaluator, and range parser. Three-layer architecture: Thinking, Application, Tools.</div>
+        <div class="card-tags">
+          <span class="tag">Python</span>
+          <span class="tag">Equity</span>
+          <span class="tag">Ranges</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-top">
+          <div class="card-icon" style="background:rgba(217,119,6,0.08);color:var(--orange);">&#9829;</div>
+          <span class="card-name">Live Coaching</span>
+        </div>
+        <div class="card-desc">CoachBot runs in your main session &mdash; get real-time GTO advice, hand analysis, and strategy tips while you play. Always responsive, never blocked by bot decisions.</div>
+        <div class="card-tags">
+          <span class="tag">Real-time</span>
+          <span class="tag">GTO Advice</span>
+          <span class="tag">Bilingual</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-top">
+          <div class="card-icon" style="background:var(--tag-bg);color:var(--accent);">&#8644;</div>
+          <span class="card-name">Dual-Session Architecture</span>
+        </div>
+        <div class="card-desc">Main session for coaching + background BotManager for AI decisions. Each bot spawns as a fresh isolated session with parallel subagents. Zero information leakage.</div>
+        <div class="card-tags">
+          <span class="tag">Isolation</span>
+          <span class="tag">Parallel</span>
+          <span class="tag">Fair Play</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-top">
+          <div class="card-icon" style="background:rgba(124,58,237,0.08);color:var(--purple);">&#127760;</div>
+          <span class="card-name">PokerNow Fallback</span>
+        </div>
+        <div class="card-desc">Join existing pokernow.com rooms with full bot support. WebSocket bridge + file-based IPC orchestrator. Use when joining someone else's game.</div>
+        <div class="card-tags">
+          <span class="tag">pokernow.com</span>
+          <span class="tag">WebSocket</span>
+          <span class="tag">Bridge</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Architecture -->
+<section class="section" id="architecture">
+  <div class="container">
+    <h2 class="section-title">Architecture</h2>
+    <p class="section-hint">Four subsystems, two ports, three isolation layers.</p>
+
+    <div class="arch">
+      <div class="arch-box">
+        <div class="arch-box-title">CoachBot / You</div>
+        <div class="arch-box-port">:3456</div>
+        <div class="arch-box-desc">Main session &middot; relay layer</div>
+      </div>
+      <div class="arch-arrow">&harr;</div>
+      <div class="arch-box">
+        <div class="arch-box-title">Poker Server</div>
+        <div class="arch-box-port">:3457</div>
+        <div class="arch-box-desc">Game engine &middot; BotManager API</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="card-top">
+          <span class="card-name">poker-server/</span>
+          <span class="card-badge" style="background:var(--accent);">PRIMARY</span>
+        </div>
+        <div class="card-desc">Self-hosted Texas Hold'em backend. HTTP + WebSocket on port 3457, browser UI, <code>/state</code> and <code>/action</code> API for bots. Optional <code>--public</code> for LAN play.</div>
+      </div>
+      <div class="card">
+        <div class="card-top">
+          <span class="card-name">poker-strategy/</span>
+          <span class="card-badge" style="background:var(--green);">GTO BRAIN</span>
+        </div>
+        <div class="card-desc">Five strategy docs (1,025 lines) + five Python tools (1,343 lines). Equity, odds, preflop, evaluator, range parser. Three-layer: Thinking &rarr; Application &rarr; Tools.</div>
+      </div>
+      <div class="card">
+        <div class="card-top">
+          <span class="card-name">bot-management/</span>
+          <span class="card-badge" style="background:var(--purple);">BOTS</span>
+        </div>
+        <div class="card-desc">BotManager background loop polls for pending turns. Each batch spawns fresh <code>claude&nbsp;-p</code> sessions with parallel subagents. Personality + strategy per bot.</div>
+      </div>
+      <div class="card">
+        <div class="card-top">
+          <span class="card-name">pokernow-runtime/</span>
+          <span class="card-badge" style="background:var(--orange);">FALLBACK</span>
+        </div>
+        <div class="card-desc">WebSocket bridge to pokernow.com rooms. Orchestrator manages bot connections + file-based IPC. Only used when joining external rooms.</div>
+      </div>
+    </div>
+
+    <h3 class="section-title" style="font-size:1.1rem;">Information Isolation</h3>
+    <p class="section-hint">Three layers ensure no bot cheats.</p>
+    <div class="isolation">
+      <div class="isolation-layer">
+        <div class="isolation-num">L1</div>
+        <div>
+          <div class="isolation-title">Data Layer</div>
+          <div class="isolation-desc">Each bot only receives its own hole cards. No cross-bot data at the API level.</div>
+        </div>
+      </div>
+      <div class="isolation-layer">
+        <div class="isolation-num">L2</div>
+        <div>
+          <div class="isolation-title">Prompt Layer</div>
+          <div class="isolation-desc">Bot prompts contain zero file paths, no directory names, no other bot names. Strategy docs inlined, not read from disk.</div>
+        </div>
+      </div>
+      <div class="isolation-layer">
+        <div class="isolation-num">L3</div>
+        <div>
+          <div class="isolation-title">Session Layer</div>
+          <div class="isolation-desc">CoachBot runs in main session. Bot decisions run in separate <code>claude -p</code> sessions. User's cards never enter any bot's prompt.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Bot Roster -->
+<section class="section" id="bots">
+  <div class="container">
+    <h2 class="section-title">Bot Roster</h2>
+    <p class="section-hint">From fish to pro. Create new bots with natural language.</p>
+    <div class="grid-2">
+      <div class="bot-card">
+        <div class="bot-avatar" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);">G</div>
+        <div class="bot-info">
+          <div>
+            <span class="bot-name">GTO Grace</span>
+            <span class="bot-model" style="background:var(--purple);color:#fff;">opus</span>
+          </div>
+          <div class="bot-style">Balanced pro &mdash; plays GTO with full tool access, exploits deviations.</div>
+          <div class="bot-traits">
+            <span class="tag">Balanced</span>
+            <span class="tag">GTO Tools</span>
+            <span class="tag">Reads Opponents</span>
+          </div>
+        </div>
+      </div>
+      <div class="bot-card">
+        <div class="bot-avatar" style="background:linear-gradient(135deg,#4b5563,#1f2937);">S</div>
+        <div class="bot-info">
+          <div>
+            <span class="bot-name">Shark Alice</span>
+            <span class="bot-model" style="background:var(--accent);color:#fff;">sonnet</span>
+          </div>
+          <div class="bot-style">Ice-cold shark &mdash; tight-aggressive, preys on weakness, minimal tells.</div>
+          <div class="bot-traits">
+            <span class="tag">TAG</span>
+            <span class="tag">Predatory</span>
+            <span class="tag">Silent</span>
+          </div>
+        </div>
+      </div>
+      <div class="bot-card">
+        <div class="bot-avatar" style="background:linear-gradient(135deg,#16a34a,#15803d);">A</div>
+        <div class="bot-info">
+          <div>
+            <span class="bot-name">ARIA Bot</span>
+            <span class="bot-model" style="background:var(--accent);color:#fff;">sonnet</span>
+          </div>
+          <div class="bot-style">Steady regular &mdash; solid fundamentals, adapts to table dynamics.</div>
+          <div class="bot-traits">
+            <span class="tag">Regular</span>
+            <span class="tag">Adaptive</span>
+            <span class="tag">Consistent</span>
+          </div>
+        </div>
+      </div>
+      <div class="bot-card">
+        <div class="bot-avatar" style="background:linear-gradient(135deg,#dc2626,#b91c1c);">M</div>
+        <div class="bot-info">
+          <div>
+            <span class="bot-name">Maniac Charlie</span>
+            <span class="bot-model" style="background:var(--accent);color:#fff;">sonnet</span>
+          </div>
+          <div class="bot-style">Reckless LAG &mdash; loves to bluff, puts max pressure, unpredictable.</div>
+          <div class="bot-traits">
+            <span class="tag">LAG</span>
+            <span class="tag">Aggressive</span>
+            <span class="tag">Bluff-heavy</span>
+          </div>
+        </div>
+      </div>
+      <div class="bot-card">
+        <div class="bot-avatar" style="background:linear-gradient(135deg,#d97706,#b45309);">B</div>
+        <div class="bot-info">
+          <div>
+            <span class="bot-name">Fish Bob</span>
+            <span class="bot-model" style="background:var(--text-muted);color:#fff;">haiku</span>
+          </div>
+          <div class="bot-style">Happy fish &mdash; calls too much, chases draws, having a great time.</div>
+          <div class="bot-traits">
+            <span class="tag">Loose-Passive</span>
+            <span class="tag">No Tools</span>
+            <span class="tag">Fun</span>
+          </div>
+        </div>
+      </div>
+      <div class="bot-card" style="border-style:dashed;">
+        <div class="bot-avatar" style="background:var(--bg);color:var(--text-muted);border:2px dashed var(--border);">+</div>
+        <div class="bot-info">
+          <div><span class="bot-name" style="color:var(--text-muted);">Your Custom Bot</span></div>
+          <div class="bot-style">Describe a personality in natural language and a new bot is created. "Create a TAG-style bot using opus model" &mdash; that's all it takes.</div>
+          <div class="bot-traits">
+            <span class="tag">Natural Language</span>
+            <span class="tag">Any Style</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<div class="footer">
+  <div style="margin-bottom:0.4rem;">
+    <strong style="color:var(--text-secondary);">PokerBot</strong> &nbsp;&middot;&nbsp; Multi-Agent Poker System
+  </div>
+  4 subsystems &middot; 6 bots &middot; 5 strategy docs &middot; 5 GTO tools &middot; Self-hosted server &middot; Powered by Claude Code
+</div>
+
+</body>
 </html>
