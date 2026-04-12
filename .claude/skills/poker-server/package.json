@@ -1,0 +1,16 @@
+{
+  "name": "poker-server",
+  "version": "1.0.0",
+  "description": "Self-hosted Texas Hold'em server — browser UI + WebSocket + AI bots",
+  "private": true,
+  "scripts": {
+    "start": "node poker-server.js",
+    "public": "node poker-server.js --public"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "optionalDependencies": {
+    "localtunnel": "^2.0.0"
+  }
+}

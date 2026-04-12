@@ -3,7 +3,9 @@ __pycache__/
 *.pyc
 
 # Claude Code local settings
-.claude/
+.claude/*
+!.claude/skills/
+.claude/skills/sch-*
 
 # VS Code
 .vscode/
