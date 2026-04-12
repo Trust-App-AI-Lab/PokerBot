@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>PokerBot Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; padding: 32px; }
+  h1 { color: #58a6ff; font-size: 24px; margin-bottom: 8px; }
+  h2 { color: #58a6ff; font-size: 18px; margin: 32px 0 12px; border-bottom: 1px solid #21262d; padding-bottom: 6px; }
+  h3 { color: #79c0ff; font-size: 14px; margin: 16px 0 8px; }
+  .subtitle { color: #8b949e; font-size: 14px; margin-bottom: 24px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin: 16px 0; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; }
+  .card-title { color: #58a6ff; font-size: 15px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .card-title .tag { font-size: 11px; background: #1f6feb33; color: #58a6ff; padding: 2px 8px; border-radius: 10px; font-weight: 400; }
+  .card-title .tag.entry { background: #23863633; color: #3fb950; }
+  .card-title .tag.internal { background: #f8514933; color: #f85149; }
+  .card-title .tag.fallback { background: #d2992233; color: #d29922; }
+  .file-list { font-size: 13px; color: #8b949e; line-height: 1.8; }
+  .file-list .fname { color: #c9d1d9; font-family: 'SF Mono', Consolas, monospace; font-size: 12px; }
+  .file-list .desc { color: #8b949e; }
+  .file-list .role { color: #d2a8ff; font-size: 11px; }
+
+  /* Diagram */
+  .diagram { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 24px; margin: 16px 0; overflow-x: auto; }
+  .diagram pre { font-family: 'SF Mono', Consolas, monospace; font-size: 13px; line-height: 1.7; color: #c9d1d9; }
+  .diagram .hl { color: #58a6ff; }
+  .diagram .gr { color: #3fb950; }
+  .diagram .yl { color: #d29922; }
+  .diagram .rd { color: #f85149; }
+  .diagram .pp { color: #d2a8ff; }
+  .diagram .gy { color: #484f58; }
+
+  /* Flow */
+  .flow { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+  .flow-item { background: #1f6feb22; border: 1px solid #1f6feb55; border-radius: 6px; padding: 6px 12px; font-size: 13px; color: #79c0ff; font-family: monospace; }
+  .flow-arrow { color: #484f58; font-size: 18px; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+  th { text-align: left; color: #8b949e; font-weight: 500; padding: 6px 12px; border-bottom: 1px solid #30363d; }
+  td { padding: 6px 12px; border-bottom: 1px solid #21262d; }
+  td code { background: #1f6feb22; color: #79c0ff; padding: 1px 6px; border-radius: 3px; font-size: 12px; }
+
+  .root-files { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+  .root-file { background: #21262d; border-radius: 4px; padding: 8px 12px; font-size: 12px; }
+  .root-file .n { color: #c9d1d9; font-family: monospace; }
+  .root-file .d { color: #8b949e; font-size: 11px; margin-top: 2px; }
+
+  .section-note { color: #8b949e; font-size: 13px; margin: 4px 0 12px; font-style: italic; }
+</style>
+</head>
+<body>
+
+<h1>PokerBot Architecture</h1>
+<p class="subtitle">Multi-agent poker system — 5 Skills, 3 roles, 4 game modes</p>
+
+<!-- ==================== FILE TREE ==================== -->
+<h2>Project Structure</h2>
+
+<h3>Root Files</h3>
+<div class="root-files">
+  <div class="root-file"><div class="n">CLAUDE.md</div><div class="d">thin index → AGENTS.md</div></div>
+  <div class="root-file"><div class="n">AGENTS.md</div><div class="d">single source of truth</div></div>
+  <div class="root-file"><div class="n">modes.md</div><div class="d">game lifecycle flows (CC reads on-demand)</div></div>
+  <div class="root-file"><div class="n">start-game.sh</div><div class="d">start everything</div></div>
+  <div class="root-file"><div class="n">stop-game.sh</div><div class="d">stop everything</div></div>
+  <div class="root-file"><div class="n">.gitignore</div><div class="d">whitelist 5 skills only</div></div>
+</div>
+
+<!-- ==================== 5 SKILLS ==================== -->
+<h3>5 Skills (.claude/skills/)</h3>
+<div class="grid">
+
+  <!-- coachbot -->
+  <div class="card">
+    <div class="card-title">/coachbot <span class="tag entry">entry point</span></div>
+    <div class="file-list">
+      <div><span class="fname">SKILL.md</span> <span class="desc">— trigger rules, identity, GTO flow, coaching style, language (all-in-one)</span></div>
+    </div>
+  </div>
+
+  <!-- bot-management -->
+  <div class="card">
+    <div class="card-title">/bot-management <span class="tag">lifecycle</span></div>
+    <div class="file-list">
+      <div><span class="fname">SKILL.md</span> <span class="desc">— trigger rules</span></div>
+      <div><span class="fname">BOTMANAGER.md</span> <span class="desc">— architecture, session init/resume</span></div>
+      <div><span class="fname">botmanager.sh</span> <span class="desc">— polling loop (background process)</span></div>
+      <div><span class="fname">botmanager-init.md</span> <span class="desc">— prompt template: load personality</span></div>
+      <div><span class="fname">botmanager-turn.md</span> <span class="desc">— prompt template: decide + act</span></div>
+      <div><span class="fname">bots/.template/</span> <span class="desc">— new bot template</span></div>
+      <div><span class="fname">bots/Shark_Alice/</span> <span class="role">shark · TAG · sonnet</span></div>
+      <div><span class="fname">bots/GTO_Grace/</span> <span class="role">pro · TAG balanced · opus</span></div>
+      <div><span class="fname">bots/ARIA_Bot/</span> <span class="role">regular · TAG · haiku</span></div>
+      <div><span class="fname">bots/ARIA_Bot_2/</span> <span class="role">regular · TP (Nit Nancy) · haiku</span></div>
+      <div><span class="fname">bots/Fish_Bob/</span> <span class="role">fish · LP · haiku</span></div>
+      <div><span class="fname">bots/Maniac_Charlie/</span> <span class="role">regular · LAG · haiku (no tools)</span></div>
+    </div>
+  </div>
+
+  <!-- poker-server -->
+  <div class="card">
+    <div class="card-title">/poker-server <span class="tag internal">internal infra</span></div>
+    <div class="file-list">
+      <div><span class="fname">SKILL.md</span> <span class="desc">— <b>API interface</b>: 两层端口定义 + response schema</span></div>
+      <div><span class="fname">poker-server.js</span> <span class="desc">— game engine + HTTP/WS on :3457</span></div>
+      <div><span class="fname">poker-client.js</span> <span class="desc">— universal relay on :3456</span></div>
+      <div><span class="fname">lib/poker-engine.js</span> <span class="desc">— pure logic, zero I/O</span></div>
+      <div><span class="fname">public/poker-table.html</span> <span class="desc">— browser UI</span></div>
+    </div>
+  </div>
+
+  <!-- poker-strategy -->
+  <div class="card">
+    <div class="card-title">/poker-strategy <span class="tag internal">internal dependency</span></div>
+    <div class="file-list">
+      <div><span class="fname">SKILL.md</span> <span class="desc">— <b>interface</b>: tier definitions + tool commands</span></div>
+      <div style="margin: 4px 0 2px; color: #79c0ff; font-size: 12px;">tools/</div>
+      <div><span class="fname">  preflop.py</span> <span class="desc">— GTO open-raise chart</span></div>
+      <div><span class="fname">  equity.py</span> <span class="desc">— Monte Carlo equity vs range</span></div>
+      <div><span class="fname">  odds.py</span> <span class="desc">— pot odds + EV</span></div>
+      <div><span class="fname">  evaluator.py</span> <span class="desc">— hand ranking</span></div>
+      <div><span class="fname">  range_parser.py</span> <span class="desc">— expand range notation</span></div>
+      <div style="margin: 4px 0 2px; color: #79c0ff; font-size: 12px;">strategy/</div>
+      <div><span class="fname">  preflop.md</span> <span class="role">tier:regular+</span></div>
+      <div><span class="fname">  postflop.md</span> <span class="role">tier:regular+</span></div>
+      <div><span class="fname">  range.md</span> <span class="role">tier:regular+</span></div>
+      <div><span class="fname">  gto-fundamentals.md</span> <span class="role">tier:shark+</span></div>
+      <div><span class="fname">  sizing.md</span> <span class="role">tier:shark+</span></div>
+    </div>
+  </div>
+
+  <!-- pokernow-runtime (full width) -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title">/pokernow-runtime <span class="tag fallback">fallback backend</span></div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+      <div class="file-list">
+        <div><span class="fname">SKILL.md</span> <span class="desc">— pokernow.com adapter, URL-only trigger</span></div>
+        <div><span class="fname">scripts/coach-ws.js</span> <span class="desc">— bridge pokernow → :3456</span></div>
+        <div><span class="fname">scripts/orchestrator.js</span> <span class="desc">— bot WebSocket + file IPC</span></div>
+      </div>
+      <div class="file-list">
+        <div><span class="fname">scripts/decide.py</span> <span class="desc">— bot decision helper</span></div>
+        <div><span class="fname">lib/poker-now.js</span> <span class="desc">— pokernow protocol client</span></div>
+        <div><span class="fname">lib/game-state.js</span> <span class="desc">— state parser</span></div>
+        <div><span class="fname">references/protocol.md</span> <span class="desc">— WS protocol reference</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ==================== CALL HIERARCHY ==================== -->
+<h2>Skill Call Hierarchy</h2>
+<div class="diagram"><pre>
+<span class="gr">User</span> ──→ <span class="hl">/coachbot</span> <span class="gy">(唯一入口)</span>
+           │
+           ├──→ <span class="hl">/bot-management</span> <span class="gy">(加/建/删 bot)</span>
+           │       │
+           │       └──→ <span class="pp">/poker-strategy</span> <span class="gy">(bot init 按 tier 加载)</span>
+           │
+           ├──→ <span class="pp">/poker-strategy</span> <span class="gy">(CoachBot 自用 tier:pro)</span>
+           │
+           ├──→ <span class="rd">/poker-server</span> <span class="gy">(调试服务器时)</span>
+           │
+           └──→ <span class="yl">/pokernow-runtime</span> <span class="gy">(仅当 pokernow.com URL)</span>
+
+<span class="gy">────────────────────────────────────────────────────</span>
+<span class="gy">CC 直接读取（不经过 SKILL）:</span>
+  <span class="gr">User</span> ──→ <span class="gy">CC reads</span> modes.md <span class="gy">(game control commands)</span>
+  <span class="gr">User</span> ──→ <span class="gy">CC reads</span> AGENTS.md <span class="gy">(architecture reference)</span>
+</pre></div>
+
+<!-- ==================== RUNTIME ARCHITECTURE ==================== -->
+<h2>Runtime Architecture</h2>
+<div class="diagram"><pre>
+<span class="hl">┌─────────────────────────────────────────────────────────────────┐</span>
+<span class="hl">│</span>  <span class="gr">Main Session (CoachBot)</span>                                       <span class="hl">│</span>
+<span class="hl">│</span>                                                                 <span class="hl">│</span>
+<span class="hl">│</span>  User ↔ CoachBot ↔ curl localhost:<span class="yl">3456</span> ↔ <span class="yl">poker-client.js</span> (relay) <span class="hl">│</span>
+<span class="hl">│</span>                                           <span class="gy">│</span>                     <span class="hl">│</span>
+<span class="hl">└───────────────────────────────────────────<span class="gy">│</span>─────────────────────┘</span>
+                                            <span class="gy">│ WebSocket</span>
+<span class="rd">┌───────────────────────────────────────────<span class="gy">│</span>─────────────────────┐</span>
+<span class="rd">│</span>  <span class="pp">poker-server.js</span> (:<span class="pp">3457</span>)                   <span class="gy">│</span>                     <span class="rd">│</span>
+<span class="rd">│</span>                                           <span class="gy">▼</span>                     <span class="rd">│</span>
+<span class="rd">│</span>  poker-engine.js  ←→  HTTP/WS API  ←→  clients               <span class="rd">│</span>
+<span class="rd">│</span>                                           <span class="gy">▲</span>                     <span class="rd">│</span>
+<span class="rd">└───────────────────────────────────────────<span class="gy">│</span>─────────────────────┘</span>
+                                            <span class="gy">│ HTTP (curl)</span>
+<span class="yl">┌───────────────────────────────────────────<span class="gy">│</span>─────────────────────┐</span>
+<span class="yl">│</span>  <span class="gr">BotManager</span> (background)                  <span class="gy">│</span>                     <span class="yl">│</span>
+<span class="yl">│</span>                                           <span class="gy">│</span>                     <span class="yl">│</span>
+<span class="yl">│</span>  botmanager.sh ── poll /state ─────────────┘                     <span class="yl">│</span>
+<span class="yl">│</span>       │                                                          <span class="yl">│</span>
+<span class="yl">│</span>       └── bot turn? ──→ claude -p --resume ──→ POST /action     <span class="yl">│</span>
+<span class="yl">│</span>                          <span class="gy">│</span>                                       <span class="yl">│</span>
+<span class="yl">│</span>                    <span class="pp">PlayBot session</span>                                <span class="yl">│</span>
+<span class="yl">│</span>                    (personality + /poker-strategy tier)           <span class="yl">│</span>
+<span class="yl">└─────────────────────────────────────────────────────────────────┘</span>
+</pre></div>
+
+<!-- ==================== MODE ROUTING ==================== -->
+<h2>Mode Routing</h2>
+<table>
+  <tr><th>User Input</th><th>Mode</th><th>Trigger Chain</th></tr>
+  <tr>
+    <td>"play poker" / "开一局" / "教学"</td>
+    <td><code>Mode 1 (Host)</code></td>
+    <td><code>/coachbot</code> → <code>bash start-game.sh</code></td>
+  </tr>
+  <tr>
+    <td>IP address / <code>ws://</code> URL</td>
+    <td><code>Mode 2 (Join)</code></td>
+    <td><code>/coachbot</code> → <code>node poker-client.js ws://addr:3457</code></td>
+  </tr>
+  <tr>
+    <td><code>pokernow.com/games/</code> URL</td>
+    <td><code>Mode 3 (PokerNow)</code></td>
+    <td><code>/pokernow-runtime</code> → <code>coach-ws.js</code></td>
+  </tr>
+  <tr>
+    <td>"text mode" / "纯文字"</td>
+    <td><code>Mode 4 (Text)</code></td>
+    <td><code>/coachbot</code> → no server, all in chat</td>
+  </tr>
+</table>
+
+<!-- ==================== DATA FLOW ==================== -->
+<h2>Data Flow (Two-Port Model)</h2>
+<p class="section-note">CoachBot/CC only touches :3456 (relay). BotManager only touches :3457 (server). Never cross.</p>
+<table>
+  <tr><th>Data</th><th>Source</th><th>Consumer</th><th>Endpoint</th></tr>
+  <tr>
+    <td>User game state</td>
+    <td>relay</td>
+    <td>CoachBot / CC</td>
+    <td><code>GET :3456/state</code> <span style="color:#8b949e">(no player field needed)</span></td>
+  </tr>
+  <tr>
+    <td>Bot game state</td>
+    <td>server</td>
+    <td>BotManager</td>
+    <td><code>GET :3457/state?player=X</code></td>
+  </tr>
+  <tr>
+    <td>User actions</td>
+    <td>CoachBot</td>
+    <td>relay → server</td>
+    <td><code>POST :3456/action</code> <span style="color:#8b949e">(no player field)</span></td>
+  </tr>
+  <tr>
+    <td>Bot actions</td>
+    <td>PlayBot</td>
+    <td>server</td>
+    <td><code>POST :3457/action</code> <span style="color:#8b949e">(player field required)</span></td>
+  </tr>
+  <tr>
+    <td>GTO analysis</td>
+    <td>/poker-strategy tools</td>
+    <td>CoachBot / PlayBot</td>
+    <td><code>python3 &lt;SKILL_DIR&gt;/tools/*.py</code></td>
+  </tr>
+  <tr>
+    <td>Hand history</td>
+    <td>relay (isolated)</td>
+    <td>Review mode</td>
+    <td><code>GET :3456/history?last=N</code></td>
+  </tr>
+  <tr>
+    <td>Game config</td>
+    <td>host</td>
+    <td>server</td>
+    <td><code>GET/POST :3457/config</code></td>
+  </tr>
+  <tr>
+    <td>Join / Start / Rebuy</td>
+    <td>CC (setup)</td>
+    <td>server</td>
+    <td><code>POST :3457/join</code> <code>/start</code> <code>/rebuy</code></td>
+  </tr>
+</table>
+
+<!-- ==================== SKILL INTERFACE ==================== -->
+<h2>Skill Interface (/poker-strategy)</h2>
+<p class="section-note">The only skill with a tiered interface — all callers reference tier name, never internal file paths.</p>
+<table>
+  <tr><th>Tier</th><th>Strategy Docs</th><th>Tools Available</th><th>Used By</th></tr>
+  <tr>
+    <td><code>fish</code></td>
+    <td>(none)</td>
+    <td>(none)</td>
+    <td>Fish_Bob</td>
+  </tr>
+  <tr>
+    <td><code>regular</code></td>
+    <td>preflop, postflop, range</td>
+    <td>preflop, odds</td>
+    <td>ARIA_Bot, Nit_Nancy, Maniac_Charlie*</td>
+  </tr>
+  <tr>
+    <td><code>shark</code></td>
+    <td>ALL 5</td>
+    <td>preflop, equity, odds</td>
+    <td>Shark_Alice</td>
+  </tr>
+  <tr>
+    <td><code>pro</code></td>
+    <td>ALL 5 (deep focus)</td>
+    <td>ALL (with re-runs)</td>
+    <td>GTO_Grace, CoachBot</td>
+  </tr>
+</table>
+<p style="color:#8b949e; font-size: 12px; margin-top: 4px;">* Maniac_Charlie has regular knowledge but Use Tools = no (deliberately ignores fundamentals)</p>
+
+<!-- ==================== 3 ROLES ==================== -->
+<h2>Three Roles</h2>
+<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+  <div class="card">
+    <div class="card-title" style="color: #3fb950;">CoachBot</div>
+    <div class="file-list">
+      <div><span class="desc">Main session, real-time GTO coach</span></div>
+      <div><span class="desc">Observer only (manual) / Proxy (auto)</span></div>
+      <div><span class="desc">Reads :3456/state</span></div>
+      <div><span class="desc">Every msg: 🃏 CoachBot:</span></div>
+      <div><span class="desc">Bilingual (auto-detect)</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title" style="color: #d29922;">BotManager</div>
+    <div class="file-list">
+      <div><span class="desc">Background process (botmanager.sh)</span></div>
+      <div><span class="desc">Stateless polling loop (2s)</span></div>
+      <div><span class="desc">claude -p --resume per turn</span></div>
+      <div><span class="desc">Reads :3457/state directly</span></div>
+      <div><span class="desc">~8-10s per bot decision</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title" style="color: #d2a8ff;">PlayBot</div>
+    <div class="file-list">
+      <div><span class="desc">Individual AI personality</span></div>
+      <div><span class="desc">Persistent session (MD5 UUID)</span></div>
+      <div><span class="desc">Init: load personality + /poker-strategy tier</span></div>
+      <div><span class="desc">Turn: hot resume, decide, POST, EXIT</span></div>
+      <div><span class="desc">Information isolated</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== KEY INVARIANTS ==================== -->
+<h2>Key Invariants</h2>
+<div class="card" style="border-color: #f8514966;">
+  <div class="file-list" style="font-size: 14px; line-height: 2;">
+    <div><span style="color:#f85149;">1.</span> CC always reads/writes via <code>localhost:3456</code> (relay layer), regardless of backend</div>
+    <div><span style="color:#f85149;">2.</span> Each bot only sees its own cards (information isolation)</div>
+    <div><span style="color:#f85149;">3.</span> CoachBot ≠ game orchestrator — CC reads modes.md on-demand for game flow</div>
+    <div><span style="color:#f85149;">4.</span> Cross-skill references use <code>/skillname</code>, never hardcoded paths</div>
+    <div><span style="color:#f85149;">5.</span> <code>bash stop-game.sh</code> handles ALL modes, one command full cleanup</div>
+  </div>
+</div>
+
+</body>
+</html>
