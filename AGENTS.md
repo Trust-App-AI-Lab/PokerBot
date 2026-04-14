@@ -18,6 +18,8 @@ metadata:
         - node
         - npm
         - python3
+        - claude
+        - curl
 ---
 
 # Agents — Role Definitions & Architecture

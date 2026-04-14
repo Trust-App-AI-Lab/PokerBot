@@ -15,6 +15,7 @@ metadata:
       bins:
         - node
         - npm
+        - curl
 ---
 
 # Poker Now Runtime — Fallback Backend

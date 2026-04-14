@@ -15,6 +15,7 @@ metadata:
       bins:
         - node
         - python3
+        - curl
 ---
 
 # CoachBot — Real-Time Poker Coach

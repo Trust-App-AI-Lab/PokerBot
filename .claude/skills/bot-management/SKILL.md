@@ -15,6 +15,8 @@ metadata:
       bins:
         - node
         - python3
+        - claude
+        - curl
 ---
 
 # Bot Management — AI Bot Lifecycle

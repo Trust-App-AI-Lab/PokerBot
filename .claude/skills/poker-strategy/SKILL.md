@@ -15,6 +15,9 @@ metadata:
     requires:
       bins:
         - python3
+    install:
+      - kind: pip
+        package: numpy
 ---
 
 # Poker Agent — Tool & Strategy Interface
