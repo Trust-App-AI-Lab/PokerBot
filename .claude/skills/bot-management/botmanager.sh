@@ -9,6 +9,22 @@
 set +e  # Don't exit on errors — we handle them explicitly
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+cd "$PROJECT_ROOT"
+
+# Source pinned binary paths if present (PY / NODE / CLAUDE_BIN)
+[ -f "$PROJECT_ROOT/paths.env" ] && source "$PROJECT_ROOT/paths.env"
+
+# Portable timeout — Mac doesn't ship GNU `timeout`. Use perl fallback.
+run_with_timeout() {
+  local secs="$1"; shift
+  if command -v timeout &>/dev/null; then
+    timeout "$secs" "$@"
+  elif command -v gtimeout &>/dev/null; then
+    gtimeout "$secs" "$@"
+  else
+    perl -e 'alarm shift @ARGV; exec @ARGV or die' "$secs" "$@"
+  fi
+}
 PROMPT_TURN="$PROJECT_ROOT/.claude/skills/bot-management/botmanager-turn.md"
 PID_FILE="$PROJECT_ROOT/.claude/skills/bot-management/.botmanager.pid"
 LOG_FILE="$PROJECT_ROOT/.claude/skills/bot-management/.botmanager.log"
@@ -56,29 +72,24 @@ if [ "$MODE" = "file" ] && [ ! -f "$GAME" ]; then
 fi
 PROMPT_INIT="$PROJECT_ROOT/.claude/skills/bot-management/botmanager-init.md"
 
-# Find working python
-PY=""
-for cmd in py python python3; do
-  if $cmd -c "print(1)" &>/dev/null; then PY="$cmd"; break; fi
-done
-if [ -z "$PY" ]; then
-  log "ERROR: No working python found."
+# Python (paths.env may have set $PY already)
+PY="${PY:-python3}"
+if ! $PY -c "print(1)" &>/dev/null; then
+  log "ERROR: python3 not found at '$PY'. Edit paths.env."
   exit 1
 fi
 log "Using python: $PY"
 
-# Find claude CLI
-CLAUDE_BIN=""
-if command -v claude &>/dev/null; then
-  CLAUDE_BIN="claude"
-elif [ -f "$HOME/.local/bin/claude.exe" ]; then
-  CLAUDE_BIN="$HOME/.local/bin/claude.exe"
-elif [ -f "$HOME/.local/bin/claude" ]; then
-  CLAUDE_BIN="$HOME/.local/bin/claude"
-fi
-
+# Claude CLI (paths.env may have set $CLAUDE_BIN already)
 if [ -z "$CLAUDE_BIN" ]; then
-  log "ERROR: claude CLI not found. Install Claude Code first."
+  if command -v claude &>/dev/null; then
+    CLAUDE_BIN="$(command -v claude)"
+  elif [ -f "$HOME/.local/bin/claude" ]; then
+    CLAUDE_BIN="$HOME/.local/bin/claude"
+  fi
+fi
+if [ -z "$CLAUDE_BIN" ] || [ ! -x "$CLAUDE_BIN" ]; then
+  log "ERROR: claude CLI not found at '$CLAUDE_BIN'. Edit paths.env or install Claude Code."
   exit 1
 fi
 log "Using claude CLI: $CLAUDE_BIN"
@@ -88,11 +99,7 @@ if [ -f "$PID_FILE" ]; then
   OLD_PID=$(cat "$PID_FILE" 2>/dev/null || true)
   if [ -n "$OLD_PID" ] && [ "$OLD_PID" != "$$" ]; then
     log "Killing old BotManager (PID $OLD_PID)..."
-    if command -v taskkill &>/dev/null; then
-      taskkill //PID "$OLD_PID" //F > /dev/null 2>&1 || true
-    else
-      kill "$OLD_PID" 2>/dev/null || true
-    fi
+    kill "$OLD_PID" 2>/dev/null || true
     sleep 1
   fi
 fi
@@ -126,7 +133,7 @@ try:
         print(actor)
     elif not bots and actor:
         import os
-        profiles = os.path.join(sys.argv[3], 'bot-management', 'bots')
+        profiles = os.path.join(sys.argv[3], '.claude', 'skills', 'bot-management', 'bots')
         bot_dir = os.path.join(profiles, actor)
         if os.path.isfile(os.path.join(bot_dir, 'personality.md')):
             print(actor)
@@ -141,19 +148,33 @@ get_bot_model() {
   local bot="$1"
   local personality="$PROJECT_ROOT/.claude/skills/bot-management/bots/$bot/personality.md"
   if [ -f "$personality" ]; then
-    grep -oP '^\- \*\*Model\*\*: \K\w+' "$personality" 2>/dev/null || true
+    sed -n 's/^- \*\*Model\*\*: \([[:alnum:]_-]*\).*/\1/p' "$personality" 2>/dev/null | head -1
+  fi
+}
+
+# ── Helper: portable md5 hex digest (Mac `md5` / Linux `md5sum` differ).
+# Uses `printf %s` (no trailing newline) to stay byte-compatible with
+# the Node-side relay (poker-client.js deriveCoachSid) so bot and coach
+# SIDs agree across shell pre-wipe and Node runtime.
+_md5_hex() {
+  if command -v md5sum &>/dev/null; then
+    printf %s "$1" | md5sum | awk '{print $1}'
+  else
+    printf %s "$1" | md5
   fi
 }
 
 # ── Helper: generate deterministic session UUID from bot name ──
 bot_session_id() {
   local bot="$1"
-  # Generate a stable UUID from bot name only — survives BotManager restarts
-  echo "pokerbot-$bot" | md5sum | sed 's/\(.\{8\}\)\(.\{4\}\)\(.\{4\}\)\(.\{4\}\)\(.\{12\}\).*/\1-\2-\3-\4-\5/'
+  _md5_hex "pokerbot-$bot" | sed 's/\(.\{8\}\)\(.\{4\}\)\(.\{4\}\)\(.\{4\}\)\(.\{12\}\).*/\1-\2-\3-\4-\5/'
 }
 
-# ── Associative array for session tracking ──
-declare -A BOT_SESSIONS  # bot_name → "initialized" or ""
+# ── Session tracking (space-delimited list of initialized bot names) ──
+# Using a flat string for bash 3.2 compat on Mac (assoc arrays need bash 4+)
+BOT_SESSIONS=" "
+bot_is_initialized() { [[ "$BOT_SESSIONS" == *" $1 "* ]]; }
+bot_mark_initialized() { BOT_SESSIONS="$BOT_SESSIONS$1 "; }
 
 # ── Helper: initialize a bot session ──
 init_bot() {
@@ -164,23 +185,27 @@ init_bot() {
   local model_flag=""
   if [ -n "$model" ]; then model_flag="--model $model"; fi
 
-  # Always create a fresh session — no resume from previous games.
-  # Old session (if any) is overwritten by --session-id.
+  # Bot sessions use a deterministic UUID per bot name. If the session
+  # already exists from a prior run, claude CLI errors with "already in use"
+  # — we treat that as "already initialized" and reuse the existing session.
   log "Initializing $bot (model: ${model:-default}, session: $sid)..."
   local result
-  result=$(timeout 120 "$CLAUDE_BIN" -p "$(cat "$PROMPT_INIT")
+  result=$(run_with_timeout 120 "$CLAUDE_BIN" -p "$(cat "$PROMPT_INIT")
 
 SERVER_URL=$SERVER_URL
 BOT_NAME=$bot" \
     --session-id "$sid" \
     $model_flag \
-    --allowedTools "Read(.claude/skills/bot-management/bots/$bot/*),Read(.claude/skills/poker-strategy/*),Glob(.claude/skills/bot-management/bots/$bot/*),Glob(.claude/skills/poker-strategy/*),Grep(.claude/skills/bot-management/bots/$bot/*),Grep(.claude/skills/poker-strategy/*),Bash(curl *),Bash(python *),Bash(python3 *),Bash(py *)" \
-    --workDir "$PROJECT_ROOT" \
-    2>> "$LOG_FILE") || true
+    --permission-mode bypassPermissions \
+    2>&1) || true
 
   if echo "$result" | grep -qi "load successfully"; then
-    BOT_SESSIONS["$bot"]="initialized"
+    bot_mark_initialized "$bot"
     log "✓ $bot initialized successfully"
+    return 0
+  elif echo "$result" | grep -qi "already in use"; then
+    bot_mark_initialized "$bot"
+    log "✓ $bot session already exists — reusing"
     return 0
   else
     log "✗ $bot init failed: $result"
@@ -197,13 +222,13 @@ invoke_bot_turn() {
   local model_flag=""
   if [ -n "$model" ]; then model_flag="--model $model"; fi
 
-  timeout 90 "$CLAUDE_BIN" -p "$(cat "$PROMPT_TURN")
+  run_with_timeout 90 "$CLAUDE_BIN" -p "$(cat "$PROMPT_TURN")
 
 SERVER_URL=$SERVER_URL
 BOT_NAME=$bot" \
     --resume "$sid" \
     $model_flag \
-    --allowedTools "Bash(curl *),Bash(python *),Bash(python3 *),Bash(py *)" \
+    --permission-mode bypassPermissions \
     2>> "$LOG_FILE" || log "WARN: claude -p exited with error for $bot"
 }
 
@@ -216,7 +241,7 @@ while game_alive; do
       BOT_MODEL=$(get_bot_model "$BOT")
 
       # Init if not yet initialized (fallback for failed pre-init)
-      if [ "${BOT_SESSIONS[$BOT]:-}" != "initialized" ]; then
+      if ! bot_is_initialized "$BOT"; then
         init_bot "$BOT" "$BOT_MODEL" || continue
       fi
 
@@ -240,8 +265,8 @@ except Exception:
 
       if [ "$COUNT" -gt "0" ]; then
         log "$COUNT pending turn(s) — invoking claude -p"
-        timeout 90 "$CLAUDE_BIN" -p "$(cat "$PROMPT_FILE")" \
-          --allowedTools "Read,Write,Edit,Glob,Grep,Bash(python *),Bash(python3 *)" \
+        run_with_timeout 90 "$CLAUDE_BIN" -p "$(cat "$PROMPT_FILE")" \
+          --permission-mode bypassPermissions \
           2>> "$LOG_FILE" || log "WARN: claude -p exited with error (see $LOG_FILE)"
         debug "claude -p completed"
       else

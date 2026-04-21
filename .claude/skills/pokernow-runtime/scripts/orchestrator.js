@@ -24,7 +24,7 @@ const { GameState }       = require('../lib/game-state');
 
 // ── Paths ────────────────────────────────────────
 const ENGINE_DIR   = path.join(__dirname, '..');
-const PROJECT_ROOT = path.join(ENGINE_DIR, '..');
+const PROJECT_ROOT = path.join(ENGINE_DIR, '..', '..', '..');
 const PROFILES_DIR = path.join(PROJECT_ROOT, 'game-data');
 
 // Shared files at project root — CC only needs to watch these

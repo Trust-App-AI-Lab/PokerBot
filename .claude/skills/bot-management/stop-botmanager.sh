@@ -5,15 +5,10 @@ SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="$SKILL_DIR/.botmanager.pid"
 log() { echo "[bot-management] $*"; }
 
-# Helper: kill a process reliably (cross-platform)
 kill_pid() {
   local pid="$1"
   [ -z "$pid" ] && return 1
-  if command -v taskkill &>/dev/null; then
-    taskkill //PID "$pid" //F > /dev/null 2>&1
-  else
-    kill -9 "$pid" 2>/dev/null
-  fi
+  kill -9 "$pid" 2>/dev/null
 }
 
 if [ -f "$PID_FILE" ]; then

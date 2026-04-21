@@ -42,7 +42,7 @@ const CONFIG = {
 };
 
 // Bot profile directory — each bot's files live under PokerBot/game-data/{botName}/
-const PROJECT_ROOT = path.join(ROOT_DIR, '..');  // PokerBot/
+const PROJECT_ROOT = path.join(ROOT_DIR, '..', '..', '..');  // PokerBot/
 const PROFILE_DIR  = path.join(PROJECT_ROOT, 'game-data', CONFIG.botName);
 if (!fs.existsSync(PROFILE_DIR)) fs.mkdirSync(PROFILE_DIR, { recursive: true });
 

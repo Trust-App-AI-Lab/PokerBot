@@ -254,30 +254,74 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .hidden { display: none !important; }
 
-  /* ── Spectator mode (relay — actions via CC only) ── */
-  .spectator-mode .ctrl-sitout,
-  .spectator-mode .ctrl-rebuy,
-  .spectator-mode .ctrl-leave,
+  /* ── Spectator mode (relay — host-only controls hidden, own-seat controls kept) ── */
   .spectator-mode .ctrl-sep,
   .spectator-mode .ctrl-start,
   .spectator-mode .ctrl-pause,
   .spectator-mode .ctrl-settings,
   .spectator-mode .kick-btn,
   .spectator-mode .settings-panel { display: none !important; }
+
+  /* ── Action buttons (clickable) ── */
   .available-actions {
-    display: flex; flex-direction: column; gap: 4px; padding: 2px 0; align-items: flex-start;
+    display: flex; flex-direction: column; gap: 4px; padding: 2px 0;
+    align-items: stretch; width: 100%;
   }
-  .act-badge {
-    display: inline-block; padding: 3px 10px; border-radius: 14px;
-    font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+  .act-btn {
+    display: block; width: 100%; padding: 6px 8px;
+    border: 1.5px solid transparent; border-radius: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+    cursor: pointer; background: transparent;
+    transition: filter 0.12s, transform 0.08s;
+    font-family: inherit;
   }
-  .cc-banner-mini {
-    display: none; padding: 4px 8px; margin-top: 4px;
-    background: #7c3aed30; border: 1.5px solid #7c3aed60;
-    border-radius: 14px; font-size: 9px; font-weight: 700; color: #a78bfa;
-    letter-spacing: 0.3px; white-space: nowrap;
+  .act-btn:hover { filter: brightness(1.25); }
+  .act-btn:active { transform: translateY(1px); }
+  .act-btn:disabled { opacity: 0.35; cursor: not-allowed; filter: none; }
+  .act-btn.act-fold  { background:#64748b20; border-color:#64748b60; color:#94a3b8; }
+  .act-btn.act-check { background:#10b98130; border-color:#10b98160; color:#10b981; }
+  .act-btn.act-call  { background:#3b82f630; border-color:#3b82f660; color:#60a5fa; }
+  .act-btn.act-raise { background:#f59e0b30; border-color:#f59e0b60; color:#fbbf24; }
+
+  /* ── Raise panel ── */
+  .raise-panel {
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 6px; margin-top: 2px;
+    background: #0f172a80; border: 1px solid #334155;
+    border-radius: 6px;
   }
-  .spectator-mode .cc-banner-mini.visible { display: block; }
+  .raise-input-row { display: flex; gap: 4px; align-items: center; }
+  .raise-input {
+    flex: 1; min-width: 0;
+    padding: 4px 6px; font-size: 11px; font-weight: 600;
+    background: #0f172a; color: #e2e8f0;
+    border: 1px solid #475569; border-radius: 4px;
+    font-family: ui-monospace, 'SF Mono', monospace;
+  }
+  .raise-submit {
+    padding: 4px 8px; font-size: 10px; font-weight: 800;
+    background: #f59e0b; color: #0f172a;
+    border: none; border-radius: 4px; cursor: pointer;
+    letter-spacing: 0.3px;
+  }
+  .raise-submit:hover { background: #fbbf24; }
+  .raise-submit:disabled { opacity: 0.4; cursor: not-allowed; }
+  .raise-presets { display: flex; gap: 3px; flex-wrap: wrap; }
+  .raise-preset {
+    flex: 1; padding: 3px 4px; font-size: 9.5px; font-weight: 700;
+    background: #1e293b; color: #94a3b8;
+    border: 1px solid #334155; border-radius: 3px;
+    cursor: pointer; letter-spacing: 0.2px;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+  .raise-preset:hover { background: #334155; color: #e2e8f0; }
+  .raise-range {
+    font-size: 9px; color: #64748b;
+    font-family: ui-monospace, 'SF Mono', monospace;
+    text-align: center;
+    letter-spacing: 0.2px;
+  }
 
   /* ── Control bar ── */
   .control-bar {
@@ -360,9 +404,215 @@
   /* ── Sitting out dim ── */
   .player-seat.sitting-out { opacity: 0.35; }
   .sit-out-tag { font-size: 9px; color: #f59e0b; font-weight: 600; letter-spacing: 0.5px; }
+
+  /* ── CoachBot column (fixed left panel, resizable) ── */
+  .coach-column {
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: 420px; /* default; overridden by JS from localStorage */
+    background: #26272a;
+    border-right: 1px solid #3d3f44;
+    display: flex; flex-direction: column;
+    z-index: 5;
+    font-family: 'Inter', -apple-system, 'Segoe UI', sans-serif;
+  }
+  @media (max-width: 900px) { .coach-column { display: none; } }
+
+  /* Drag handle on right edge — 6px hit area, 1px visible line */
+  .coach-resizer {
+    position: absolute; top: 0; right: -3px; bottom: 0;
+    width: 6px;
+    cursor: col-resize;
+    z-index: 10;
+    background: transparent;
+    transition: background 0.15s;
+  }
+  .coach-resizer:hover,
+  .coach-resizer.dragging {
+    background: #c4a6fb55;
+  }
+  body.resizing-coach { cursor: col-resize; user-select: none; }
+  body.resizing-coach * { pointer-events: none; }
+
+  .coach-header {
+    padding: 14px 20px;
+    border-bottom: 1px solid #3d3f44;
+    background: #2e3034;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .coach-title { font-size: 13px; font-weight: 600; color: #e6e8eb; }
+  .coach-status { font-size: 11px; color: #9ca3af; display: flex; align-items: center; gap: 5px; }
+  .coach-status::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: #4ade80;
+  }
+
+  .coach-log {
+    flex: 1; overflow-y: auto;
+    padding: 16px 20px 24px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .coach-log::-webkit-scrollbar { width: 5px; }
+  .coach-log::-webkit-scrollbar-thumb { background: #3a3c42; border-radius: 3px; }
+
+  .coach-msg {
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .coach-msg.assistant {
+    background: #33353a;
+    border: 1px solid #3a3c42;
+    color: #e6e8eb;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+  }
+  .coach-msg.assistant .prefix { color: #c4a6fb; font-weight: 600; margin-right: 4px; }
+  .coach-msg.assistant code {
+    background: #2a2c30;
+    border: 1px solid #3a3c42;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 12px;
+    color: #f4d58d;
+  }
+  .coach-msg.assistant strong { color: #f4d58d; font-weight: 600; }
+  .coach-msg.user {
+    background: #2e3034;
+    border: 1px solid #3a3c42;
+    color: #e6e8eb;
+    align-self: flex-end;
+    max-width: 85%;
+  }
+  .coach-msg.error {
+    background: #3a1f1f;
+    border: 1px solid #7f1d1d;
+    color: #fca5a5;
+    position: relative;
+    padding-right: 24px;  /* room for dismiss button */
+  }
+  .coach-msg-close {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    width: 16px;
+    height: 16px;
+    line-height: 14px;
+    text-align: center;
+    cursor: pointer;
+    color: #fca5a5;
+    background: transparent;
+    border: 1px solid #7f1d1d;
+    border-radius: 3px;
+    font-size: 12px;
+    font-family: ui-monospace, 'SF Mono', monospace;
+    user-select: none;
+  }
+  .coach-msg-close:hover { background: #7f1d1d; color: #fff; }
+  .coach-msg.system {
+    background: transparent;
+    padding: 4px 0 2px;
+    color: #9ca3af;
+    font-size: 12px;
+    font-weight: 500;
+    border: none;
+  }
+  /* Per-seat action log (diff'd from state.actions in poker-client.js).
+     Left-aligned bubble, same side as CoachBot but visually lighter — smaller
+     text, muted tone, tighter padding — so a stream of action log entries
+     doesn't overwhelm the actual coaching content.                          */
+  .coach-msg.log {
+    background: #1c1f24;
+    border: 1px solid #2a2d33;
+    color: #94a3b8;
+    align-self: flex-start;
+    max-width: 85%;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-family: ui-monospace, 'SF Mono', monospace;
+    letter-spacing: 0.2px;
+  }
+  .coach-msg.log .log-actor { color: #cbd5e1; font-weight: 600; }
+  .coach-msg.log .log-actor.me { color: #f4d58d; }
+  .coach-msg.log .log-verb { color: #a7b4c4; }
+  .coach-msg.log .log-amt { color: #e6e8eb; font-weight: 600; }
+  .coach-msg.log .log-hand { color: #6b7280; margin-right: 6px; }
+  .coach-msg-ts {
+    font-size: 10px; color: #6b7280;
+    font-family: ui-monospace, 'SF Mono', monospace;
+    margin-bottom: 4px;
+  }
+
+  .coach-thinking {
+    font-size: 12px; color: #9ca3af;
+    font-style: italic;
+    padding: 2px 14px;
+  }
+  .coach-thinking .dots::after {
+    content: '...';
+    animation: coachDots 1.2s steps(4, end) infinite;
+  }
+  @keyframes coachDots {
+    0%   { content: ''; }
+    25%  { content: '.'; }
+    50%  { content: '..'; }
+    75%  { content: '...'; }
+  }
+
+  .coach-input-area {
+    padding: 12px 16px;
+    border-top: 1px solid #3d3f44;
+    background: #2e3034;
+    display: flex; gap: 8px; align-items: flex-end;
+    flex-shrink: 0;
+  }
+  .coach-input {
+    flex: 1; resize: none;
+    padding: 8px 10px;
+    background: #26272a;
+    color: #e6e8eb;
+    border: 1px solid #3d3f44;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .coach-input:focus { outline: none; border-color: #c4a6fb; }
+  .coach-input:disabled { opacity: 0.5; cursor: not-allowed; }
+  .coach-send {
+    padding: 8px 14px;
+    background: #c4a6fb;
+    color: #1e1f22;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px; font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .coach-send:hover { background: #d4b9ff; }
+  .coach-send:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 </head>
 <body>
+
+<!-- ── CoachBot column (left) ── -->
+<div id="coach-column" class="coach-column">
+  <div class="coach-header">
+    <span class="coach-title">🃏 CoachBot</span>
+    <span class="coach-status">live</span>
+  </div>
+  <div id="coach-log" class="coach-log"></div>
+  <div class="coach-input-area">
+    <textarea id="coach-input" class="coach-input"
+              placeholder="问 CoachBot…（Cmd/Ctrl+Enter 发送）"
+              rows="2"></textarea>
+    <button class="coach-send" id="coach-send-btn" onclick="askCoach()">发送</button>
+  </div>
+  <div id="coach-resizer" class="coach-resizer" title="拖动调整宽度（双击重置）"></div>
+</div>
 
 <div id="scaler">
 
@@ -445,7 +695,6 @@
       <span id="turn-badge" class="your-turn-badge hidden">YOUR TURN</span>
       <span id="paused-badge" class="paused-badge hidden">PAUSED</span>
       <div id="available-actions" class="available-actions hidden"></div>
-      <div class="cc-banner-mini">Tell CoachBot Your Action</div>
     </div>
    </div>
   </div>
@@ -670,6 +919,14 @@ function handleMessage(msg) {
       addChatMessage(msg.player, msg.message);
       break;
 
+    case 'coach':
+      addCoachMessage(msg);
+      break;
+
+    case 'coach-thinking':
+      setCoachThinking(!!msg.on);
+      break;
+
     case 'error':
       addChatMessage('Error', msg.message);
       break;
@@ -789,9 +1046,8 @@ function render(state) {
   badge.style.color = ps.color;
   badge.style.border = `1px solid ${ps.color}40`;
 
-  // Turn badge + CoachBot prompt
+  // Turn badge
   document.getElementById('turn-badge').classList.toggle('hidden', !isMyTurn);
-  document.querySelector('.cc-banner-mini')?.classList.toggle('visible', isMyTurn);
 
   // Pot
   document.getElementById('pot-value').textContent = '$' + pot.toLocaleString();
@@ -904,21 +1160,50 @@ function render(state) {
     }).join('');
   }
 
-  // Available actions (display-only, user acts via CC chat)
+  // Available actions (clickable buttons) — user can act directly from UI
   const availEl = document.getElementById('available-actions');
   if (isMyTurn) {
     availEl.classList.remove('hidden');
     const raiseMin = Math.max(mnr, 1);
     const raiseMax = Math.max(mxr, raiseMin);
+    const canRaise = raiseMax >= raiseMin && raiseMax > 0;
+    const pot = state.pot || 0;
+
+    // Preset raise amounts (total bet, clamped to [min, max])
+    const clamp = (v) => Math.max(raiseMin, Math.min(raiseMax, Math.round(v)));
+    const potAfterCall = pot + ca * 2; // rough post-call pot (hero + villain complete)
+    const presetHalf = clamp(ca + potAfterCall * 0.5);
+    const presetPot  = clamp(ca + potAfterCall);
+    const preset25x  = clamp(Math.max(ca * 2.5, raiseMin));
+
     let html = '';
     if (ca === 0) {
-      html += `<span class="act-badge" style="background:#10b98130;border:1.5px solid #10b98160;color:#10b981">check</span>`;
-      html += `<span class="act-badge" style="background:#64748b20;border:1.5px solid #64748b60;color:#64748b">fold</span>`;
-      html += `<span class="act-badge" style="background:#f59e0b20;border:1.5px solid #f59e0b60;color:#f59e0b">raise ${raiseMin}–${raiseMax}</span>`;
+      html += `<button class="act-btn act-check" onclick="actCheck()">Check</button>`;
+      html += `<button class="act-btn act-fold" onclick="actFold()">Fold</button>`;
     } else {
-      html += `<span class="act-badge" style="background:#3b82f620;border:1.5px solid #3b82f660;color:#3b82f6">call $${ca}</span>`;
-      html += `<span class="act-badge" style="background:#64748b20;border:1.5px solid #64748b60;color:#64748b">fold</span>`;
-      html += `<span class="act-badge" style="background:#f59e0b20;border:1.5px solid #f59e0b60;color:#f59e0b">raise ${raiseMin}–${raiseMax}</span>`;
+      html += `<button class="act-btn act-call" onclick="actCall()">Call $${ca}</button>`;
+      html += `<button class="act-btn act-fold" onclick="actFold()">Fold</button>`;
+    }
+
+    if (canRaise) {
+      const label = ca === 0 ? 'Bet' : 'Raise';
+      const defaultAmt = ca === 0 ? clamp(Math.max(potAfterCall * 0.5, raiseMin)) : raiseMin;
+      html += `<div class="raise-panel">
+        <div class="raise-input-row">
+          <input id="raise-input" class="raise-input" type="number"
+                 min="${raiseMin}" max="${raiseMax}" value="${defaultAmt}"
+                 step="1" onkeydown="if(event.key==='Enter')actRaiseFromInput()">
+          <button class="raise-submit" onclick="actRaiseFromInput()">${label}</button>
+        </div>
+        <div class="raise-presets">
+          <button class="raise-preset" onclick="setRaise(${raiseMin})">Min</button>
+          <button class="raise-preset" onclick="setRaise(${presetHalf})">½p</button>
+          <button class="raise-preset" onclick="setRaise(${presetPot})">Pot</button>
+          ${ca > 0 ? `<button class="raise-preset" onclick="setRaise(${preset25x})">2.5×</button>` : ''}
+          <button class="raise-preset" onclick="setRaise(${raiseMax})">All-in</button>
+        </div>
+        <div class="raise-range">$${raiseMin}–$${raiseMax}</div>
+      </div>`;
     }
     availEl.innerHTML = html;
   } else {
@@ -998,19 +1283,188 @@ function addChatMessage(player, message) {
 }
 
 // ══════════════════════════════════════════════════
+// COACHBOT PANEL (left column)
+// ══════════════════════════════════════════════════
+
+// Minimal markdown → HTML. Runs on ALREADY-escaped text, so `<` / `>` are
+// already `&lt;` / `&gt;` and can't open tags. We only touch these sequences:
+//   `code`              → <code>code</code>
+//   **bold**            → <strong>bold</strong>
+//   ^#{1,6} Heading$    → <strong>Heading</strong>   (treat headings as bold, no size bump)
+// Lists (`- item`) and line breaks render correctly already because
+// .coach-msg has `white-space: pre-wrap`.
+function renderCoachMarkdown(s) {
+  if (!s) return '';
+  // Inline code first so backtick-wrapped `**x**` stays literal.
+  s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  // Bold (non-greedy, single line).
+  s = s.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
+  // Markdown headings → bold (at start of line).
+  s = s.replace(/^#{1,6}\s+(.+)$/gm, '<strong>$1</strong>');
+  return s;
+}
+
+function addCoachMessage(msg, opts) {
+  const log = document.getElementById('coach-log');
+  if (!log) return;
+  // Insert before the thinking indicator if it's present (keeps it pinned to bottom)
+  const thinking = document.getElementById('coach-thinking-indicator');
+
+  const div = document.createElement('div');
+  const role = msg.role || 'assistant';
+  div.className = 'coach-msg ' + role;
+
+  const ts = msg.ts ? new Date(msg.ts).toLocaleTimeString() : '';
+  const tsHTML = ts ? `<div class="coach-msg-ts">${ts}</div>` : '';
+  const safe = escapeHTML(msg.content || '');
+  // CoachBot assistant replies are markdown — render inline bold/code/headers
+  // AFTER escaping (the transformations only touch `**` and backticks, which
+  // escapeHTML doesn't alter, so injected HTML can't smuggle through).
+  let body;
+  if (role === 'assistant') {
+    body = renderCoachMarkdown(safe);
+  } else if (role === 'log' && msg.logData) {
+    // Structured action-log payload → render with colored spans for actor /
+    // verb / amount, so a glance shows who did what. Falls back to plain
+    // `content` if structured fields are missing (older relay builds).
+    const d = msg.logData;
+    const handS = d.hand != null ? `<span class="log-hand">#${escapeHTML(String(d.hand))}</span>` : '';
+    const actorS = `<span class="log-actor${d.isMe ? ' me' : ''}">${escapeHTML(d.actor || '?')}${d.isMe ? ' (me)' : ''}</span>`;
+    const verbS = `<span class="log-verb">${escapeHTML(d.verb || '')}</span>`;
+    const amtS = d.amount ? ` <span class="log-amt">$${escapeHTML(String(d.amount))}</span>` : '';
+    body = `${handS}${actorS} ${verbS}${amtS}`;
+  } else {
+    body = safe;
+  }
+  const prefix = role === 'assistant'
+    ? `<span class="prefix">🃏 CoachBot:</span>`
+    : '';
+  // Error bubbles get a dismiss button so a cluttered chat can be cleaned up.
+  // Errors are ephemeral (not persisted) so clicking × just removes the DOM node.
+  const closeBtn = role === 'error'
+    ? '<span class="coach-msg-close" title="dismiss">×</span>'
+    : '';
+  div.innerHTML = tsHTML + prefix + body + closeBtn;
+  if (role === 'error') {
+    const btn = div.querySelector('.coach-msg-close');
+    if (btn) btn.addEventListener('click', () => div.remove());
+  }
+
+  if (thinking) log.insertBefore(div, thinking);
+  else log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+  // Cap history
+  while (log.children.length > 200) log.removeChild(log.firstChild);
+
+  // Persist to localStorage so panel survives page refresh.
+  // `opts.fromStorage` is set during hydration — don't re-save those.
+  // Only 'error' is ephemeral (tied to a specific stale action that's already past).
+  // 'log' entries (action history) persist so the chat timeline is intact after refresh.
+  const ephemeral = role === 'error';
+  if (!ephemeral && (!opts || !opts.fromStorage)) persistCoachMessage(msg);
+}
+
+// ── CoachBot panel persistence (localStorage, last 100 messages) ──
+const COACH_HISTORY_KEY = 'pokerbot.coachHistory.v1';
+const COACH_HISTORY_CAP = 100;
+function loadCoachHistory() {
+  try {
+    const raw = localStorage.getItem(COACH_HISTORY_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (_) { return []; }
+}
+function persistCoachMessage(msg) {
+  try {
+    const arr = loadCoachHistory();
+    const entry = { role: msg.role || 'assistant', content: msg.content || '', ts: msg.ts || new Date().toISOString() };
+    // Preserve structured payload so action-log bubbles re-render correctly after refresh.
+    if (msg.logData) entry.logData = msg.logData;
+    arr.push(entry);
+    while (arr.length > COACH_HISTORY_CAP) arr.shift();
+    localStorage.setItem(COACH_HISTORY_KEY, JSON.stringify(arr));
+  } catch (_) { /* quota / serialization — ignore */ }
+}
+function hydrateCoachHistory() {
+  const arr = loadCoachHistory();
+  for (const m of arr) addCoachMessage(m, { fromStorage: true });
+}
+function clearCoachHistory() {
+  try { localStorage.removeItem(COACH_HISTORY_KEY); } catch (_) {}
+  const log = document.getElementById('coach-log');
+  if (log) log.innerHTML = '';
+}
+
+function setCoachThinking(on) {
+  const log = document.getElementById('coach-log');
+  const input = document.getElementById('coach-input');
+  const sendBtn = document.getElementById('coach-send-btn');
+  if (!log) return;
+  let indicator = document.getElementById('coach-thinking-indicator');
+  if (on) {
+    if (!indicator) {
+      indicator = document.createElement('div');
+      indicator.id = 'coach-thinking-indicator';
+      indicator.className = 'coach-thinking';
+      indicator.innerHTML = '🃏 CoachBot 思考中<span class="dots"></span>';
+      log.appendChild(indicator);
+      log.scrollTop = log.scrollHeight;
+    }
+    if (input) input.disabled = true;
+    if (sendBtn) sendBtn.disabled = true;
+  } else {
+    if (indicator) indicator.remove();
+    if (input) input.disabled = false;
+    if (sendBtn) sendBtn.disabled = false;
+  }
+}
+
+async function askCoach() {
+  const input = document.getElementById('coach-input');
+  if (!input) return;
+  const q = (input.value || '').trim();
+  if (!q) return;
+  input.value = '';
+  try {
+    // Reply comes back via WS broadcast — HTTP response is redundant.
+    await fetch('/coach-ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q }),
+    });
+  } catch (e) {
+    addCoachMessage({ role: 'error', content: '请求失败: ' + e.message, ts: new Date().toISOString() });
+  }
+}
+
+// ══════════════════════════════════════════════════
 // VIEWPORT SCALING — fit 1280×720 canvas to any window size
 // ══════════════════════════════════════════════════
 const DESIGN_W = 640, DESIGN_H = 690;
+// Visual breathing room around the scaler, so the table never hugs the viewport edge
+// when coach panel is wide.
+const SCALER_MARGIN_X = 32;
+function getCoachWidth() {
+  // position:fixed elements have offsetParent === null, so use computed style.
+  const col = document.getElementById('coach-column');
+  if (!col) return 0;
+  if (getComputedStyle(col).display === 'none') return 0;
+  return col.getBoundingClientRect().width;
+}
 function fitScaler() {
-  const vw = window.innerWidth, vh = window.innerHeight;
-  // Fit to both dimensions, center in viewport
-  const scale = Math.min(vw / DESIGN_W, vh / DESIGN_H);
+  // Reserve space for the coach column if visible (hidden below 900px via @media)
+  // and keep a horizontal margin so the table doesn't touch the right edge.
+  const coachW = getCoachWidth();
+  const availW = Math.max(0, window.innerWidth - coachW - SCALER_MARGIN_X * 2);
+  const availH = window.innerHeight;
+  const scale = Math.min(availW / DESIGN_W, availH / DESIGN_H);
   const scaler = document.getElementById('scaler');
   scaler.style.transform = `scale(${scale})`;
-  const offsetX = (vw - DESIGN_W * scale) / 2;
-  const offsetY = (vh - DESIGN_H * scale) / 2;
+  const offsetX = coachW + SCALER_MARGIN_X + (availW - DESIGN_W * scale) / 2;
+  const offsetY = Math.max(0, (availH - DESIGN_H * scale) / 2);
   scaler.style.left = offsetX + 'px';
-  scaler.style.top = Math.max(0, offsetY) + 'px';
+  scaler.style.top = offsetY + 'px';
 }
 window.addEventListener('resize', fitScaler);
 fitScaler();
@@ -1026,6 +1480,29 @@ function sendWS(type, data) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type, ...data }));
   }
+}
+
+// ── Game actions (fold / check / call / raise) ──
+// Relay forwards WS {type:'action', ...} to upstream as-is.
+function actFold()  { sendWS('action', { action: 'fold' }); }
+function actCheck() { sendWS('action', { action: 'check' }); }
+function actCall()  { sendWS('action', { action: 'call' }); }
+function actRaiseFromInput() {
+  const input = document.getElementById('raise-input');
+  if (!input) return;
+  const amount = parseInt(input.value, 10);
+  if (!isFinite(amount) || amount <= 0) return;
+  const min = parseInt(input.min, 10) || 0;
+  const max = parseInt(input.max, 10) || amount;
+  if (amount < min || amount > max) {
+    addChatMessage('Error', `Raise must be between $${min} and $${max}`);
+    return;
+  }
+  sendWS('action', { action: 'raise', amount });
+}
+function setRaise(amount) {
+  const input = document.getElementById('raise-input');
+  if (input) input.value = amount;
 }
 
 function toggleSitOut() {
@@ -1137,9 +1614,100 @@ function stopTurnTimerUI() {
 }
 
 // ══════════════════════════════════════════════════
+// COACH PANEL — drag to resize + persist to localStorage
+// ══════════════════════════════════════════════════
+const COACH_WIDTH_KEY = 'pokerbot.coachWidth';
+const COACH_WIDTH_MIN = 280;
+const COACH_WIDTH_DEFAULT = 420;
+// Max clamped at runtime so table always has breathing room.
+// DESIGN_W (640) + 2× SCALER_MARGIN_X (64) = 704 minimum for a 1:1 scale,
+// but we allow scaling down, so require 480 minimum for the right side.
+function coachWidthMax() { return Math.max(COACH_WIDTH_MIN, window.innerWidth - 480); }
+
+function setCoachWidth(px, persist) {
+  const col = document.getElementById('coach-column');
+  if (!col) return;
+  const clamped = Math.max(COACH_WIDTH_MIN, Math.min(coachWidthMax(), px));
+  col.style.width = clamped + 'px';
+  if (persist) {
+    try { localStorage.setItem(COACH_WIDTH_KEY, String(clamped)); } catch {}
+  }
+  fitScaler();
+}
+
+// Restore saved width
+(function restoreCoachWidth() {
+  let saved = COACH_WIDTH_DEFAULT;
+  try {
+    const v = parseInt(localStorage.getItem(COACH_WIDTH_KEY), 10);
+    if (isFinite(v) && v > 0) saved = v;
+  } catch {}
+  setCoachWidth(saved, false);
+})();
+
+// Clamp width on window resize (in case user shrunk viewport)
+window.addEventListener('resize', () => {
+  const w = getCoachWidth();
+  if (w > 0) setCoachWidth(w, false);
+});
+
+// Drag handler
+(function wireCoachResizer() {
+  const resizer = document.getElementById('coach-resizer');
+  if (!resizer) return;
+  let startX = 0, startW = 0, dragging = false;
+
+  function onMouseMove(e) {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    setCoachWidth(startW + dx, false);
+  }
+  function onMouseUp(e) {
+    if (!dragging) return;
+    dragging = false;
+    resizer.classList.remove('dragging');
+    document.body.classList.remove('resizing-coach');
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+    // Persist final width
+    const col = document.getElementById('coach-column');
+    if (col) {
+      try { localStorage.setItem(COACH_WIDTH_KEY, String(Math.round(col.getBoundingClientRect().width))); } catch {}
+    }
+  }
+  resizer.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    dragging = true;
+    startX = e.clientX;
+    startW = document.getElementById('coach-column').getBoundingClientRect().width;
+    resizer.classList.add('dragging');
+    document.body.classList.add('resizing-coach');
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+  // Double-click to reset to default
+  resizer.addEventListener('dblclick', () => {
+    setCoachWidth(COACH_WIDTH_DEFAULT, true);
+  });
+})();
+
+// ══════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════
 drawZoneLines(); // Static — only needs to run once
+
+// Cmd/Ctrl+Enter sends the coach input
+document.getElementById('coach-input')?.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    e.preventDefault();
+    askCoach();
+  }
+});
+
+// Restore coach panel from localStorage before WS connects, so chat history
+// survives page refreshes (WS broadcasts are ephemeral — no server-side log).
+hydrateCoachHistory();
+
 connectWS();
 </script>
 </body>

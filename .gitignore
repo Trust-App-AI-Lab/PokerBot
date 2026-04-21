@@ -2,7 +2,7 @@
 __pycache__/
 *.pyc
 
-# Claude Code local settings
+# Claude Code local config (ignore .claude/ except skills/)
 .claude/*
 !.claude/skills/
 .claude/skills/sch-*
@@ -10,14 +10,40 @@ __pycache__/
 # VS Code
 .vscode/
 
-# Bot profiles — track personality.md, ignore runtime files
-bot_profiles/*/.cookies
-bot_profiles/*/turn.json
-bot_profiles/*/action.json
-bot_profiles/*/state.json
-bot_profiles/*/history.jsonl
-bot_profiles/*/bridge.pid
-bot_profiles/*/.watcher_*
+# OS
+.DS_Store
+
+# ────────────────────────────────────────────────────
+# PokerBot runtime artifacts (under .claude/skills/)
+# ────────────────────────────────────────────────────
+
+# Poker server runtime
+.claude/skills/poker-server/history.jsonl
+.claude/skills/poker-server/node_modules/
+.claude/skills/poker-server/package-lock.json
+.claude/skills/poker-server/.relay.pid
+.claude/skills/poker-server/.narrator.pid
+.claude/skills/poker-server/.server.pid
+
+# Pokernow runtime
+.claude/skills/pokernow-runtime/node_modules/
+.claude/skills/pokernow-runtime/package-lock.json
+.claude/skills/pokernow-runtime/orchestrator.pid
+.claude/skills/pokernow-runtime/game.json
+
+# Per-machine binary paths (CLAUDE_BIN, PY, NODE)
+paths.env
+
+# Bot-management runtime
+.claude/skills/bot-management/.botmanager.log
+.claude/skills/bot-management/.botmanager.pid
+
+# Per-player game state (per-session runtime dirs: Coach/, CoachBot/, etc.)
+game-data/
+
+# ────────────────────────────────────────────────────
+# Project-root runtime
+# ────────────────────────────────────────────────────
 
 # Orchestrator runtime files
 game.json
@@ -27,13 +53,18 @@ orchestrator.pid
 
 # Runtime logs
 *.log
-bot_profiles/.botmanager.log
-bot_profiles/.botmanager.pid
 
-# Per-player history directories (runtime data)
+# ────────────────────────────────────────────────────
+# Legacy pokernow bot_profiles layout (kept for compat)
+# ────────────────────────────────────────────────────
+bot_profiles/*/.cookies
+bot_profiles/*/turn.json
+bot_profiles/*/action.json
+bot_profiles/*/state.json
+bot_profiles/*/history.jsonl
+bot_profiles/*/bridge.pid
+bot_profiles/*/.watcher_*
 bot_profiles/*/history/
 bot_profiles/*/coach-ws.pid
-
-# Poker server runtime
-poker-server/history.jsonl
-poker-server/node_modules/
+bot_profiles/.botmanager.log
+bot_profiles/.botmanager.pid

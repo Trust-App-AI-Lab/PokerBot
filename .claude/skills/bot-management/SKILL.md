@@ -75,4 +75,4 @@ Kills BotManager via PID file, cleans up.
 
 - `/poker-strategy` — bots load strategy docs + call GTO tools (based on skill level tier)
 - **game-data/** — BotManager reads state, bots write action decisions
-- `/poker-server` — BotManager communicates via HTTP API (`localhost:3457`)
+- `.claude/skills/poker-server/` — BotManager communicates via HTTP API (`localhost:3457`). Not a skill; see `ARCHITECTURE.md`.

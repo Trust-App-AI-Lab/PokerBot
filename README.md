@@ -12,8 +12,8 @@ Multi-agent poker system — AI bots with distinct personalities play Texas Hold
 
 ```bash
 git clone https://github.com/nicekid1/PokerBot.git
-cd PokerBot/poker-server && npm install    # Primary: self-hosted server
-cd PokerBot/pokernow-runtime && npm install    # Optional: pokernow.com connector
+cd PokerBot/.claude/skills/poker-server && npm install        # Primary: self-hosted server
+cd ../pokernow-runtime && npm install                          # Optional: pokernow.com connector
 ```
 
 Open Claude Code in `PokerBot/` and say:
@@ -93,7 +93,7 @@ Create new bots with natural language: "create a TAG-style bot using opus model"
 
 **Background = BotManager**: Invisible to user. `botmanager.sh` polls for pending turns every 2s. Each batch spawns a fresh `claude -p` session that creates parallel subagents (one per bot). Submits actions via HTTP POST to `:3457/action`, then exits.
 
-**Root Scripts = Delegates**: `start-game.sh` delegates to `poker-server/start-server.sh`, joins bots, then starts BotManager. `stop-game.sh` delegates to each skill's stop script in reverse order.
+**Game Skill = Orchestrator**: `.claude/skills/game/start-game.sh` delegates to `poker-server/start-server.sh`, joins bots, then starts BotManager. `stop-game.sh` delegates to each skill's stop script in reverse order.
 
 ## How a Hand Plays Out
 
@@ -124,9 +124,8 @@ Repeat until showdown → next hand
 PokerBot/
   CLAUDE.md                 Project brain: rules, activation triggers, architecture
   AGENTS.md                 Role definitions, SKILL routing, mode routing
-  modes.md                  Game lifecycle: start, play, stop flows
-  start-game.sh             Full game startup (delegates to skill scripts)
-  stop-game.sh              Full game shutdown (delegates to skill scripts)
+  paths.env                 Absolute paths to python/node/claude binaries
+  game-data/                Runtime per-player state (gitignored)
   game.json                 Active game config (ephemeral, delete = stop)
 
   poker-server/             PRIMARY game backend (self-hosted)
@@ -182,8 +181,8 @@ PokerBot/
 | Scenario | Trigger | Key docs loaded |
 |---|---|---|
 | Pure Coaching | "how to play AK" / "should I call" | CoachBot SKILL.md + strategy × 5 |
-| Start Game (self-hosted) | "play poker" | poker-server SKILL.md + CoachBot docs |
-| Start Game (pokernow) | "join pokernow room" | pokernow-runtime SKILL.md + CoachBot docs |
+| Start Game (self-hosted) | "play poker" | game SKILL.md + CoachBot docs |
+| Start Game (pokernow) | "join pokernow room" | game SKILL.md + pokernow-runtime ARCHITECTURE.md + CoachBot docs |
 | Add PlayBots | "add bots" / "let AI play too" | BOTMANAGER.md + bot personality × N |
 | BotManager | botmanager.sh auto · every 2s | personality + turn.json + strategy (inlined) |
 

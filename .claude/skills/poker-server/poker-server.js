@@ -45,7 +45,7 @@ const TUNNEL_SUBDOMAIN = getArg('subdomain', ''); // --subdomain mypoker → myp
 
 // ── Paths ───────────────────────────────────────
 const SERVER_DIR    = __dirname;
-const PROJECT_ROOT  = path.join(SERVER_DIR, '..');
+const PROJECT_ROOT  = path.join(SERVER_DIR, '..', '..', '..');
 const TABLE_HTML    = path.join(SERVER_DIR, 'public', 'poker-table.html');
 const GAME_DATA     = path.join(PROJECT_ROOT, 'game-data');
 const COACH_PROFILE = path.join(GAME_DATA, 'CoachBot');

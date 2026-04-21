@@ -1,33 +1,14 @@
----
-name: poker-server
-description: >
-  PokerBot infrastructure SKILL — self-hosted poker engine + relay layer. Internal component, never user-triggered. Only referenced by other SKILLs when: debugging server connectivity ("server挂了", "3457 down"), consulting API docs, or understanding engine behavior. Normal game startup uses start-game.sh — do not invoke this SKILL for "play poker" or "开一局", that is /coachbot's job.
-author: EnyanDai
-version: 1.0.0
-tags:
-  - poker
-  - server
-  - infrastructure
-  - internal
-metadata:
-  openclaw:
-    requires:
-      bins:
-        - node
-        - npm
-        - curl
----
-
 # Poker Server — API Interface
 
-This SKILL defines the two-layer HTTP interface for the poker system. All callers (CoachBot, BotManager, modes.md) reference `/poker-server` for API usage — never read the source code directly.
+Internal infrastructure doc for the self-hosted poker engine + relay + narrator. Not a skill — this is reference material for humans and for CC when debugging server issues. Normal gameplay goes through `/game` → `start-game.sh`, which delegates here.
 
-## Two-Port Architecture
+## Port Layout
 
 | Port | Component | Used By | Role |
 |------|-----------|---------|------|
 | **:3456** | poker-client.js (relay) | **CoachBot / CC** | Single invariant — CC always reads/writes through this port, regardless of backend |
 | **:3457** | poker-server.js (engine) | **BotManager / host setup** | Direct engine access — bots POST actions, host manages config/start/join |
+| **:3460** | narrator.js | **CC (read-only) / browser narrator panel** | Event-driven coach trigger + optional auto-play |
 
 **Rule**: CoachBot only hits :3456. BotManager only hits :3457. Never cross.
 
@@ -38,42 +19,46 @@ This SKILL defines the two-layer HTTP interface for the poker system. All caller
 ### Start (server + relay only)
 
 ```bash
-bash <SKILL_DIR>/start-server.sh --name <PlayerName> [--public]
+bash <DIR>/start-server.sh --name <PlayerName> [--public]
 ```
 
-Runs: stop old → install deps (if missing) → server(:3457) → relay(:3456). Health checks built in.
+Runs: stop old → install deps (if missing) → server(:3457). Relay + narrator are started separately by `start-game.sh` at the `/game` level.
 
-`--public` flag binds server to 0.0.0.0 (LAN play). Without it, binds to localhost only.
+`--public` binds server to 0.0.0.0 (LAN play). Without it, localhost only.
 
-### Stop (server + relay only)
+### Stop (server + relay + narrator)
 
 ```bash
-bash <SKILL_DIR>/stop-server.sh
+bash <DIR>/stop-server.sh
 ```
 
-Kills: relay(:3456) → server(:3457).
+Kills: narrator(:3460) → relay(:3456) → server(:3457).
 
 ### Individual components (manual)
 
 ```bash
 # Start server only
-node <SKILL_DIR>/poker-server.js [--public] &
+node <DIR>/poker-server.js [--public] &
 # Health check: curl -s localhost:3457/info
 
 # Start relay only
-node <SKILL_DIR>/poker-client.js ws://localhost:3457 --name <PlayerName> --port 3456 &
+node <DIR>/poker-client.js ws://localhost:3457 --name <PlayerName> --port 3456 &
 # Health check: curl -s localhost:3456/state
+
+# Start narrator only
+node <DIR>/narrator.js --relay http://localhost:3456 --port 3460 --lang zh [--auto] &
+# Health check: curl -s localhost:3460/mode
 ```
 
 ### Dependency install
 
 ```bash
-npm install --prefix <SKILL_DIR>
+npm install --prefix <DIR>
 ```
 
 `start-server.sh` auto-installs if `node_modules/` is missing.
 
-> **Note**: For full game startup (server + relay + bots + BotManager), use `start-game.sh` in project root. That script delegates to `start-server.sh`, then handles bot join + BotManager.
+> **Note**: For full game startup (server + relay + bots + BotManager + narrator + browser), use `start-game.sh` in `.claude/skills/game/`.
 
 ---
 
@@ -143,6 +128,38 @@ curl -s -X POST localhost:3456/action \
 - Optional `"chat": "message"` for table talk
 
 **Response**: `{ "ok": true }` or `{ "ok": false, "error": "..." }`
+
+### POST /coach-ask
+
+Ask CoachBot a question. Spawns a serialized `claude -p --resume $COACH_SID` subprocess (FIFO queue inside the relay).
+
+```bash
+curl -s -X POST localhost:3456/coach-ask \
+  -H "Content-Type: application/json" \
+  -d '{"question":"该不该call?"}'
+```
+
+Optional fields:
+- `silent: true` — skip echoing the question in the browser coach panel (used by narrator)
+- `headline: "..."` — if `silent=true`, broadcast a short `role: "system"` line instead
+
+If the pre-warmed coach session is missing (e.g. pre-warm failed or cleared), the relay auto-initializes with `--session-id $COACH_SID` + a canned init prompt and retries once.
+
+#### Action sentinel (panel action routing)
+
+After the subprocess reply is captured, the relay scans the **last non-empty line** for:
+
+```
+ACTION=<op> [AMOUNT=<N>]
+```
+
+`<op>` ∈ `fold` `check` `call` `raise` `bet`. `AMOUNT` is an integer (absolute total bet for `raise` / `bet`). When matched, the relay:
+
+1. Strips that line from the broadcast content (the user sees the rest of the coaching reply, not the sentinel).
+2. Internally forwards `{action, amount?}` to the upstream server over the same WS the browser action buttons use.
+3. If upstream rejects the action, broadcasts a `role: "error"` coach message with the server's error text.
+
+No sentinel → no action; the reply is broadcast verbatim. The subprocess CoachBot is responsible for deciding when to emit a sentinel (see `/coachbot` SKILL → "Panel Action Routing"). The relay does not parse semantics — it is a pure last-line regex forwarder.
 
 ### GET /history
 
@@ -261,19 +278,46 @@ Global server history (not information-isolated). Same query params as relay.
 
 ---
 
+## Narrator API (:3460) — Mode Control
+
+### GET /mode
+
+```bash
+curl -s localhost:3460/mode
+# → { "mode": "manual", "lang": "zh" }
+```
+
+### POST /mode
+
+Switch between manual (CoachBot observes/coaches only) and auto (CoachBot plays for the user).
+
+```bash
+curl -s -X POST localhost:3460/mode \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"auto"}'
+# → { "ok": true, "mode": "auto" }
+
+curl -s -X POST localhost:3460/mode \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"manual","lang":"en"}'
+```
+
+---
+
 ## Component Files
 
 | File | Role |
 |------|------|
 | `poker-server.js` | Game engine + HTTP/WS server (:3457) |
-| `poker-client.js` | Universal relay (:3456), bridges any upstream |
-| `start-server.sh` | Start server + relay (this SKILL's own start script) |
-| `stop-server.sh` | Stop server + relay (this SKILL's own stop script) |
+| `poker-client.js` | Universal relay (:3456), bridges any upstream + owns serialized CoachBot spawn queue |
+| `narrator.js` | Event-driven coach trigger + auto-play loop (:3460) |
+| `start-server.sh` | Start server (this component's start script) |
+| `stop-server.sh` | Stop narrator + relay + server |
 | `lib/poker-engine.js` | Pure game logic, zero I/O |
-| `public/poker-table.html` | Browser UI (works on both :3457 and :3456) |
+| `public/poker-table.html` | Browser UI (served from :3457 and :3456) |
 
 ## Dependencies
 
 - **game-data/** — writes state.json and history files
 - **ws** npm package — WebSocket support
-- No dependency on `/poker-strategy`, `/coachbot`, `/bot-management`, or `/pokernow-runtime`
+- Standalone: does not depend on `/poker-strategy`, `/coachbot`, `/bot-management`, or the pokernow adapter.

@@ -5,24 +5,14 @@ SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SKILL_DIR/../../.." && pwd)"
 log() { echo "[pokernow-runtime] $*"; }
 
-# Helper: find PID listening on a port
 find_pid_on_port() {
-  if command -v lsof &>/dev/null; then
-    lsof -ti:"$1" 2>/dev/null | head -1
-  else
-    netstat -ano 2>/dev/null | grep ":$1.*LISTEN" | awk '{print $NF}' | head -1
-  fi
+  lsof -ti:"$1" 2>/dev/null | head -1
 }
 
-# Helper: kill a process reliably (cross-platform)
 kill_pid() {
   local pid="$1"
   [ -z "$pid" ] && return 1
-  if command -v taskkill &>/dev/null; then
-    taskkill //PID "$pid" //F > /dev/null 2>&1
-  else
-    kill -9 "$pid" 2>/dev/null
-  fi
+  kill -9 "$pid" 2>/dev/null
 }
 
 # 1. Stop orchestrator

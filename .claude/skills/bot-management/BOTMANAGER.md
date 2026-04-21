@@ -24,7 +24,7 @@ Each bot has a **persistent session** identified by a deterministic UUID derived
 claude -p "$(cat .claude/skills/bot-management/botmanager-init.md) ..." \
   --session-id "<uuid>" \
   --model <model> \
-  --allowedTools "Read,Glob,Grep,Bash(curl *),Bash(py *)"
+  --permission-mode bypassPermissions
 ```
 - Loads personality.md + strategy docs based on skill level
 - Bot confirms "load successfully"
@@ -35,7 +35,7 @@ claude -p "$(cat .claude/skills/bot-management/botmanager-init.md) ..." \
 claude -p "$(cat .claude/skills/bot-management/botmanager-turn.md) ..." \
   --resume "<uuid>" \
   --model <model> \
-  --allowedTools "Bash(curl *),Bash(py *)"
+  --permission-mode bypassPermissions
 ```
 - Hot resume — personality + strategy already in context
 - Read state → run GTO tools → decide → POST /action → EXIT
@@ -52,12 +52,7 @@ Deterministic from bot name only. Both CC and BotManager use the same function, 
 
 ## Tool Permissions
 
-| Phase | Allowed Tools | Why |
-|-------|--------------|-----|
-| Init | `Read,Glob,Grep,Bash(curl *),Bash(py *)` | Needs to read personality.md + strategy files |
-| Turn | `Bash(curl *),Bash(py *)` | Only curl for state/action + py for GTO tools |
-
-Bots cannot: write files, read other bots, execute arbitrary commands.
+当前阶段 bot 全部以 `--permission-mode bypassPermissions` 启动（未来再做细化）。
 
 ## Model Assignment
 

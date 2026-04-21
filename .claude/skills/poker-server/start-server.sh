@@ -1,8 +1,15 @@
 #!/bin/bash
-# start-server.sh — Start poker-server (:3457) + relay (:3456)
+# start-server.sh — Start poker-server (:3457) only.
 # Usage: bash start-server.sh --name <PlayerName> [--public]
-# Only starts server infrastructure. For full game (+ bots + BotManager), use project root start-game.sh.
+#
+# The relay (:3456) and narrator (:3460) are launched by start-game.sh
+# (one level up in /.claude/skills/game/) — this script only owns the
+# engine. --name is required so start-game.sh can stamp
+# game-data/.current-user (read by the relay when it launches).
 SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SKILL_DIR/../../.." && pwd)"
+[ -f "$PROJECT_ROOT/paths.env" ] && source "$PROJECT_ROOT/paths.env"
+NODE="${NODE:-node}"
 log() { echo "[poker-server] $*"; }
 
 # ── Parse args ──
@@ -27,21 +34,10 @@ if [ ! -d "$SKILL_DIR/node_modules" ]; then
 fi
 
 # ── 1. Server on :3457 ──
-node "$SKILL_DIR/poker-server.js" $PUBLIC > /dev/null 2>&1 &
+"$NODE" "$SKILL_DIR/poker-server.js" $PUBLIC > /dev/null 2>&1 &
 for i in $(seq 1 8); do
   curl -s --max-time 1 http://localhost:3457/info >/dev/null 2>&1 && break
   [ "$i" -eq 8 ] && { log "ERROR: server failed to start"; exit 1; }
   sleep 1
 done
-log "Server started on :3457"
-
-# ── 2. Relay on :3456 ──
-node "$SKILL_DIR/poker-client.js" ws://localhost:3457 --name "$NAME" --port 3456 > /dev/null 2>&1 &
-for i in $(seq 1 10); do
-  curl -s --max-time 1 http://localhost:3456/state >/dev/null 2>&1 && break
-  [ "$i" -eq 10 ] && { log "ERROR: relay failed to start"; exit 1; }
-  sleep 1
-done
-log "Relay started on :3456 (player: $NAME)"
-
-log "Ready! Server :3457 + Relay :3456"
+log "Server started on :3457 (relay/narrator launched by start-game.sh)"

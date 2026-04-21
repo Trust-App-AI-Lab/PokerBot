@@ -1,36 +1,14 @@
----
-name: pokernow-runtime
-description: >
-  PokerBot FALLBACK SKILL — only triggered when user provides a pokernow.com/games/ URL. This is the backup backend; the primary backend is poker-server (self-hosted). Trigger rules are strict: message must contain a pokernow.com link, or user explicitly says "use pokernow" / "join pokernow". Any other case (including "play poker", "开一局") should go through coachbot → poker-server, not this SKILL.
-author: EnyanDai
-version: 1.0.0
-tags:
-  - poker
-  - pokernow
-  - fallback
-  - runtime
-metadata:
-  openclaw:
-    requires:
-      bins:
-        - node
-        - npm
-        - curl
----
-
 # Poker Now Runtime — Fallback Backend
 
-**This is the FALLBACK backend.** The primary way to play is via `/poker-server` (self-hosted).
-Only use pokernow-runtime when poker-server is not an option (e.g., user specifically requests pokernow, or joining someone else's pokernow.com room).
+Alternative backend for playing on pokernow.com. Internal infrastructure doc — not a skill. The primary backend is `poker-server` (self-hosted). Use this adapter only when pokernow.com is required (e.g. joining someone else's pokernow room).
 
-For general architecture, CoachBot docs, GTO tools, and game loop → see `AGENTS.md` (project root).
-This file covers **pokernow-specific differences only**.
+For general architecture, CoachBot docs, GTO tools, and game loop → see `CLAUDE.md` (project root) and `/game` SKILL. This file covers **pokernow-specific differences only**.
 
 ---
 
-## How Mode 3 Differs from Mode 1
+## How Pokernow Mode Differs from Self-Hosted Mode
 
-| Aspect | Mode 1 (poker-server) | Mode 3 (pokernow) |
+| Aspect | Self-hosted (poker-server) | Pokernow (this adapter) |
 |---|---|---|
 | Game server | Self-hosted (:3457) | pokernow.com (remote) |
 | Bridge to :3456 | poker-client.js | coach-ws.js |
@@ -45,7 +23,7 @@ This file covers **pokernow-specific differences only**.
 ### Start (bridge + orchestrator)
 
 ```bash
-bash <SKILL_DIR>/start-pokernow.sh --url "<pokernow-game-url>" --name <UserName>
+bash <DIR>/start-pokernow.sh --url "<pokernow-game-url>" --name <UserName>
 ```
 
 Runs: stop old → install deps (if missing) → bridge(:3456) → orchestrator. Health checks built in.
@@ -53,7 +31,7 @@ Runs: stop old → install deps (if missing) → bridge(:3456) → orchestrator.
 ### Stop (bridge + orchestrator + cleanup)
 
 ```bash
-bash <SKILL_DIR>/stop-pokernow.sh
+bash <DIR>/stop-pokernow.sh
 ```
 
 Kills: orchestrator → deletes `game.json` (signals remaining processes) → bridge(:3456).
@@ -62,13 +40,13 @@ Kills: orchestrator → deletes `game.json` (signals remaining processes) → br
 
 ```bash
 # Start bridge only
-node <SKILL_DIR>/scripts/coach-ws.js "<gameUrl>" --name <UserName> --port 3456 &
+node <DIR>/scripts/coach-ws.js "<gameUrl>" --name <UserName> --port 3456 &
 
 # Start orchestrator only
-node <SKILL_DIR>/scripts/orchestrator.js &
+node <DIR>/scripts/orchestrator.js &
 
 # Stop orchestrator only
-kill $(cat <SKILL_DIR>/orchestrator.pid)
+kill $(cat <DIR>/orchestrator.pid)
 ```
 
 Orchestrator connects bots sequentially (3s apart), requests seats, watches for turns.
@@ -78,18 +56,18 @@ Orchestrator connects bots sequentially (3s apart), requests seats, watches for 
 In pokernow mode, BotManager uses file IPC instead of HTTP:
 
 ```bash
-bash <BOT_MANAGEMENT_SKILL_DIR>/botmanager.sh &
+bash <BOT_MANAGEMENT_DIR>/botmanager.sh &
 ```
 
 See `/bot-management` for BotManager start/stop.
 
-> **Note**: For full game startup/shutdown (+ BotManager + all cleanup), use `start-game.sh` / `stop-game.sh` in project root.
+> **Note**: For full game startup/shutdown (+ BotManager + all cleanup), use `start-game.sh` / `stop-game.sh` in `.claude/skills/game/`.
 
 ---
 
-## Enter Room (Mode 3 Startup)
+## Enter Room (Pokernow Mode Startup)
 
-CC detects a `pokernow.com/games/` URL → Mode 3.
+CC detects a `pokernow.com/games/` URL → pokernow mode.
 
 ### Path A: User creates a new pokernow game
 
@@ -99,8 +77,8 @@ CC detects a `pokernow.com/games/` URL → Mode 3.
 4. Start bridge (see Start/Stop above)
 5. Wait for bridge ready (health check)
 6. **Tell user to approve seat request**: coach-ws.js joins via WebSocket and requests a seat. The user (as host) must approve it in their pokernow.com browser tab.
-7. `preview_start("http://localhost:3456")` — open bridged view
-8. CronCreate (manual mode) → enter Live Game Loop
+7. Open `http://localhost:3456` in a browser to see the bridged table (normal user flow — no CC preview needed).
+8. Start narrator (`node .claude/skills/poker-server/narrator.js &`) so per-turn coaching flows into the panel.
 9. Ask: "Want to add bots?"
 
 ### Path B: User joins an existing pokernow game
@@ -108,7 +86,7 @@ CC detects a `pokernow.com/games/` URL → Mode 3.
 1. Extract URL, ask user's name
 2. Start bridge (same as Path A)
 3. **Tell user to ask host to approve**: user is NOT the host — someone else must approve
-4. `preview_start("http://localhost:3456")`, CronCreate, Live Game Loop
+4. Open `http://localhost:3456` in a browser, start narrator (same as Path A step 8)
 5. If adding bots: warn user that the host (not them) must approve bot seats too
 
 ### Cookie / Browser Restriction
@@ -121,13 +99,13 @@ The user keeps their pokernow.com browser tab open ONLY for host duties (approvi
 
 ## Add Play Bots (pokernow-specific)
 
-In poker-server mode, bots join via `POST :3457/join`. In pokernow mode, bots need WebSocket connections managed by orchestrator.js + file-based IPC.
+In self-hosted mode, bots join via `POST :3457/join`. In pokernow mode, bots need WebSocket connections managed by orchestrator.js + file-based IPC.
 
 ### Flow
 
-1. **Select bots** — same as `modes.md` (scan `/bot-management → bots/`, show list, user picks)
+1. **Select bots** — same as self-hosted (scan `/bot-management → bots/`, show list, user picks)
 
-2. **Init bot sessions** — same as `modes.md` Bot Init Flow (always fresh, no resume)
+2. **Init bot sessions** — same as self-hosted Bot Init Flow (always fresh, no resume)
 
 3. **Write/update game.json**:
    ```json
@@ -178,7 +156,7 @@ orchestrator.js detects bot's turn on pokernow.com
   → orchestrator.js sends action via WebSocket to pokernow.com
 ```
 
-Key differences from HTTP mode: no `--resume` (cold-start per turn), no `curl` (file read/write instead), BotManager needs `Read,Write,Edit` permissions (not just `Bash`).
+Key differences from HTTP mode: no `--resume` (cold-start per turn), no `curl` (uses file read/write instead).
 
 Turn timeout: 120s — if no action.json appears, orchestrator auto-folds.
 
@@ -190,8 +168,8 @@ Turn timeout: 120s — if no action.json appears, orchestrator auto-folds.
 |------|------|
 | `scripts/coach-ws.js` | Bridge pokernow.com → localhost:3456 |
 | `scripts/orchestrator.js` | Bot WebSocket manager + file IPC |
-| `start-pokernow.sh` | Start bridge + orchestrator (this SKILL's own start script) |
-| `stop-pokernow.sh` | Stop bridge + orchestrator + cleanup (this SKILL's own stop script) |
+| `start-pokernow.sh` | Start bridge + orchestrator |
+| `stop-pokernow.sh` | Stop bridge + orchestrator + cleanup |
 | `lib/poker-now.js` | Pokernow WebSocket protocol client |
 | `lib/game-state.js` | State parser |
 | `references/protocol.md` | Pokernow WS protocol reference |

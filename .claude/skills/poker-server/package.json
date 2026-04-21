@@ -11,6 +11,6 @@
     "ws": "^8.16.0"
   },
   "optionalDependencies": {
-    "localtunnel": "^2.0.0"
+    "localtunnel": "^2.0.2"
   }
 }

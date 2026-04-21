@@ -1,27 +1,26 @@
 #!/bin/bash
 # stop-server.sh — Stop poker-server (:3457) + relay (:3456)
-# Only stops server infrastructure. For full shutdown (+ BotManager + orchestrator), use project root stop-game.sh.
+# Only stops server infrastructure. For full shutdown (+ BotManager + orchestrator), use .claude/skills/game/stop-game.sh.
 log() { echo "[poker-server] $*"; }
 
-# Helper: find PID listening on a port
 find_pid_on_port() {
-  if command -v lsof &>/dev/null; then
-    lsof -ti:"$1" 2>/dev/null | head -1
-  else
-    netstat -ano 2>/dev/null | grep ":$1.*LISTEN" | awk '{print $NF}' | head -1
-  fi
+  lsof -ti:"$1" 2>/dev/null | head -1
 }
 
-# Helper: kill a process reliably (cross-platform)
 kill_pid() {
   local pid="$1"
   [ -z "$pid" ] && return 1
-  if command -v taskkill &>/dev/null; then
-    taskkill //PID "$pid" //F > /dev/null 2>&1
-  else
-    kill -9 "$pid" 2>/dev/null
-  fi
+  kill -9 "$pid" 2>/dev/null
 }
+
+# 0. Stop narrator on port 3460 (if running)
+NARRATOR_PID=$(find_pid_on_port 3460)
+if [ -n "$NARRATOR_PID" ]; then
+  kill_pid "$NARRATOR_PID"
+  log "Narrator stopped (PID $NARRATOR_PID)"
+else
+  log "Narrator not running"
+fi
 
 # 1. Stop relay on port 3456
 RELAY_PID=$(find_pid_on_port 3456)

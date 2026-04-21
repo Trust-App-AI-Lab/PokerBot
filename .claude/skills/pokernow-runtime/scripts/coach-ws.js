@@ -66,7 +66,7 @@ const CONFIG = parseArgs();
 
 // ── Paths ───────────────────────────────────────
 const ENGINE_DIR   = path.join(__dirname, '..');
-const PROJECT_ROOT = path.join(ENGINE_DIR, '..');
+const PROJECT_ROOT = path.join(ENGINE_DIR, '..', '..', '..');
 const PROFILE_DIR  = path.join(PROJECT_ROOT, 'game-data', CONFIG.botName);
 
 if (!fs.existsSync(PROFILE_DIR)) fs.mkdirSync(PROFILE_DIR, { recursive: true });
