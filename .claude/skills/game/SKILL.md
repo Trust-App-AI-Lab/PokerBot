@@ -166,7 +166,7 @@ The **Settings** panel (host-only) has an `autoStart` checkbox (default on): on 
 
 ### Mid-Game Operations (CC's main job once the game is running)
 
-CC is the **session-level** manager — lifecycle + config, not per-hand actions. Per-hand actions (fold/call/raise) go through the browser: either the action buttons (direct WS to relay) or the CoachBot panel input box (user chats → subprocess CoachBot decides → relay parses `ACTION=…` sentinel on its reply and forwards upstream — see `/coachbot` → "Panel Action Routing"). CC never POSTs to `/action`.
+CC is the **session-level** manager — lifecycle + config, not per-hand actions. Per-hand actions (fold/call/raise) go through the browser action buttons or the subprocess CoachBot. CC never POSTs to `/action`.
 
 | Intent | Trigger phrases | Command |
 |---|---|---|
@@ -178,7 +178,7 @@ CC is the **session-level** manager — lifecycle + config, not per-hand actions
 | Switch CoachBot to auto-play | "自动模式" / "帮我打" / "auto play" | `curl -s -X POST localhost:3460/mode -H 'Content-Type: application/json' -d '{"mode":"auto"}'` |
 | Switch CoachBot back to manual | "我来打" / "manual" / "stop auto" | `curl -s -X POST localhost:3460/mode -H 'Content-Type: application/json' -d '{"mode":"manual"}'` |
 
-**If the user says "fold" / "call" / "raise 200" in CC chat**: don't POST /action. Point them to the browser — either click the action buttons, or type the same command into the CoachBot panel (the subprocess CoachBot will confirm if ambiguous and emit the sentinel on explicit commands). CC is session-level; per-hand decisions live in the browser so the eyes-on-table UX stays coherent.
+**If the user says "fold" / "call" / "raise 200" in CC chat**: don't POST /action. Point them to the browser — either click the action buttons, or type the same command into the CoachBot panel (the subprocess CoachBot confirms if ambiguous and curls `/action` itself on explicit commands). CC is session-level; per-hand decisions live in the browser so the eyes-on-table UX stays coherent.
 
 ### Stop Game
 
@@ -201,7 +201,7 @@ echo "pokerbot-$BOT_NAME" | md5 | sed 's/\(.\{8\}\)\(.\{4\}\)\(.\{4\}\)\(.\{4\}\
 # CoachBot session
 echo "coachbot-$USER_NAME" | md5 | sed 's/\(.\{8\}\)\(.\{4\}\)\(.\{4\}\)\(.\{4\}\)\(.\{12\}\).*/\1-\2-\3-\4-\5/'
 ```
-Same name → same SID. Same md5 scheme used everywhere (start-game.sh, botmanager.sh, CC).
+Same name → same SID. Same md5 scheme used everywhere (start-game.sh, botmanager.js, botmanager.sh, CC).
 
 **Wipe on game start** (`start-game.sh` deletes `~/.claude/projects/<enc>/<sid>.jsonl` + companion dir) — guarantees fresh claude-side conversation history for every new game. Game history (`history.jsonl`, `game-data/`) is untouched.
 
@@ -232,7 +232,7 @@ Once the browser is open, coaching is **event-driven**. No CC polling.
 
 - Server (:3457) → broadcasts state diffs to relay.
 - Relay (:3456) → pushes state to browser, serves the CoachBot panel, owns the serialized `claude -p --resume $COACH_SID` FIFO queue.
-- Narrator (:3460) → subscribes to relay WS, detects `your_turn` / `hand_result` events, posts to `:3456/coach-ask` with a state summary; in `auto` mode, its prompt instructs the subprocess to put `ACTION=… AMOUNT=…` on the last line, and the **relay** strips/forwards the sentinel (narrator just checks `r.action` to confirm it landed).
+- Narrator (:3460) → subscribes to relay WS, detects `your_turn` / `hand_result` events, posts to `:3456/coach-ask` with a state summary; in `auto` mode, its prompt tells the subprocess to curl `:3456/action` itself after analysis (no sentinel, no relay parsing — CoachBot submits directly).
 - Browser panel → receives CoachBot replies via WS, user clicks action buttons.
 - CC → free to handle management commands / chat questions.
 

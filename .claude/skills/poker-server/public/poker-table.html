@@ -255,12 +255,12 @@
   .hidden { display: none !important; }
 
   /* ── Spectator mode (relay — host-only controls hidden, own-seat controls kept) ── */
-  .spectator-mode .ctrl-sep,
-  .spectator-mode .ctrl-start,
-  .spectator-mode .ctrl-pause,
-  .spectator-mode .ctrl-settings,
-  .spectator-mode .kick-btn,
-  .spectator-mode .settings-panel { display: none !important; }
+  /* "spectator-mode" here means the browser was auto-joined by relay (host
+     flow via start-game.sh) — NOT a view-only spectator. The named user IS
+     the host, so Start / Pause / Settings must remain usable. We keep
+     `.kick-btn` hidden since the host interacts with other seats via
+     server-side commands, not by clicking opponent seats. */
+  .spectator-mode .kick-btn { display: none !important; }
 
   /* ── Action buttons (clickable) ── */
   .available-actions {
@@ -447,6 +447,48 @@
     background: #4ade80;
   }
 
+  /* Wrap around coach-log so we can position the "jump to bottom" button
+     absolutely without it affecting log layout. */
+  .coach-log-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .coach-scroll-btn {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 6px 14px;
+    font-size: 12px;
+    color: #e6e8eb;
+    background: #4a3e8f;
+    border: 1px solid #6a58c4;
+    border-radius: 20px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    z-index: 10;
+  }
+  .coach-scroll-btn:hover { background: #5a4e9f; }
+  .coach-scroll-btn.hidden { display: none; }
+
+  /* Yellow strip shown while CoachBot is self-compacting. Rare (~every 30
+     user asks) but long (15-20s) — without this the user thinks their
+     question was lost. Pulsing background to avoid feeling frozen. */
+  .coach-maint-banner {
+    padding: 6px 12px;
+    font-size: 12px;
+    color: #b98b3f;
+    background: #3a2d14;
+    border-bottom: 1px solid #5a4622;
+    text-align: center;
+    animation: coachMaintPulse 1.6s ease-in-out infinite;
+  }
+  .coach-maint-banner.hidden { display: none; }
+  @keyframes coachMaintPulse { 0%,100% { background: #3a2d14 } 50% { background: #4a3a1c } }
+
   .coach-log {
     flex: 1; overflow-y: auto;
     padding: 16px 20px 24px;
@@ -463,6 +505,84 @@
     white-space: pre-wrap;
     word-wrap: break-word;
   }
+  /* Streaming bubble — blinking-caret hint that CoachBot is still writing. */
+  .coach-msg.streaming .coach-msg-body::after {
+    content: '▌';
+    display: inline-block;
+    margin-left: 2px;
+    opacity: 0.6;
+    animation: coachCaret 0.9s steps(2, end) infinite;
+  }
+  @keyframes coachCaret { 0%, 50% { opacity: 0.6 } 51%, 100% { opacity: 0 } }
+  .coach-tool-chip {
+    display: inline-block;
+    margin: 0 4px;
+    padding: 1px 6px;
+    font-size: 11px;
+    color: #b0b4bc;
+    background: #2a2c30;
+    border-radius: 4px;
+    border: 1px solid #3a3c42;
+  }
+  /* Read → single inline chip, just the file name. Sits between paragraphs
+     of reasoning like a little bookmark — no click, no expand. */
+  .coach-read-chip {
+    display: inline-block;
+    margin: 4px 0;
+    padding: 2px 8px;
+    font-size: 11.5px;
+    color: #b0b4bc;
+    background: #2a2c30;
+    border: 1px solid #3a3c42;
+    border-radius: 10px;
+  }
+  /* Tool call block inside a streaming coach bubble — header row + command
+     + output lines. Appears between paragraphs of reasoning. */
+  .coach-tool-block {
+    margin: 8px 0;
+    padding: 6px 10px;
+    background: #2a2c30;
+    border: 1px solid #3a3c42;
+    border-radius: 6px;
+    font-size: 12px;
+  }
+  .coach-tool-header {
+    color: #b0b4bc;
+    font-weight: 500;
+    margin-bottom: 4px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .coach-tool-header:hover { color: #d8dae0; }
+  .coach-tool-caret {
+    display: inline-block;
+    width: 10px;
+    color: #6c7078;
+    font-size: 10px;
+  }
+  /* Collapsed: hide cmd + output, shrink padding to a tight chip row. */
+  .coach-tool-block.collapsed {
+    padding: 4px 10px;
+  }
+  .coach-tool-block.collapsed .coach-tool-header { margin-bottom: 0; }
+  .coach-tool-block.collapsed .coach-tool-cmd,
+  .coach-tool-block.collapsed .coach-tool-out { display: none; }
+  .coach-tool-cmd,
+  .coach-tool-out {
+    margin: 2px 0;
+    padding: 4px 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    color: #d8dae0;
+    background: #1e2024;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .coach-tool-out { color: #7dd8a0; }  /* green-ish for output */
+  .coach-tool-block .hidden { display: none; }
+  /* Block-level hide for filtered plumbing (e.g. /action submission curl). */
+  .coach-tool-block.hidden-tool { display: none; }
   .coach-msg.assistant {
     background: #33353a;
     border: 1px solid #3a3c42;
@@ -604,10 +724,22 @@
     <span class="coach-title">🃏 CoachBot</span>
     <span class="coach-status">live</span>
   </div>
-  <div id="coach-log" class="coach-log"></div>
+  <!-- Hidden by default; toggled via JS on coach-maintenance WS event.
+       Purpose: tell the user why their chat message or next auto-coach
+       call is held up while the bot self-compacts. -->
+  <div id="coach-maintenance-banner" class="coach-maint-banner hidden">
+    🔄 CoachBot 定期维护中，稍等 15-20 秒…
+  </div>
+  <div class="coach-log-wrap">
+    <div id="coach-log" class="coach-log"></div>
+    <!-- Floating "scroll to bottom" button — shown when user has scrolled
+         up AND new content arrived below. Click jumps back to tail. -->
+    <button id="coach-scroll-btn" class="coach-scroll-btn hidden"
+            onclick="scrollCoachToBottom()" title="跳到最新">↓ 新消息</button>
+  </div>
   <div class="coach-input-area">
     <textarea id="coach-input" class="coach-input"
-              placeholder="问 CoachBot…（Cmd/Ctrl+Enter 发送）"
+              placeholder="问 CoachBot…（Enter 发送，Shift+Enter 换行）"
               rows="2"></textarea>
     <button class="coach-send" id="coach-send-btn" onclick="askCoach()">发送</button>
   </div>
@@ -826,6 +958,25 @@ function connectWS() {
 function handleMessage(msg) {
   switch (msg.type) {
     case 'welcome':
+      // Auto-clear CoachBot chat when we reconnect to a DIFFERENT game.
+      // The relay generates a fresh GAME_ID at startup; a mismatch here
+      // means we're looking at a new game (start-game.sh was run), so the
+      // persisted chat from the prior game is stale and would confuse the
+      // coach on its own transcript. Same-game refresh keeps the chat.
+      //
+      // First-ever visit (no stored gameId) also counts as "different" —
+      // otherwise a user who had chat in localStorage from before this
+      // feature shipped would keep seeing it forever until a second
+      // start-game. We want fresh-game semantics from first load on.
+      if (msg.gameId) {
+        try {
+          const stored = localStorage.getItem('pokerbot.gameId');
+          if (stored !== msg.gameId) {
+            clearCoachHistory();
+          }
+          localStorage.setItem('pokerbot.gameId', msg.gameId);
+        } catch (_) { /* quota / disabled — ignore */ }
+      }
       // Auto-join via relay name
       if (msg.autoJoinName) {
         document.body.classList.add('spectator-mode');
@@ -927,10 +1078,222 @@ function handleMessage(msg) {
       setCoachThinking(!!msg.on);
       break;
 
+    case 'coach-maintenance': {
+      const banner = document.getElementById('coach-maintenance-banner');
+      if (banner) banner.classList.toggle('hidden', !msg.on);
+      break;
+    }
+
+    // Streaming CoachBot output — arrives in 3 parts:
+    //   coach-stream-start → open a new bubble for id
+    //   coach-delta (repeatedly) → append text, re-render
+    //   coach-stream-end → finalize + persist to localStorage
+    //   coach-tool (optional) → small chip showing which tool is running
+    // Goal: the user reads reasoning AS claude generates it, so when the
+    // action eventually lands (via claude's Bash tool hitting /action) the
+    // preceding reasoning is already visible.
+    case 'coach-stream-start':
+      startStreamingCoachBubble(msg);
+      break;
+    case 'coach-delta':
+      appendStreamingCoachDelta(msg);
+      break;
+    case 'coach-stream-end':
+      finalizeStreamingCoachBubble(msg);
+      break;
+    // Tool call lifecycle (stream bubble, keyed by toolUseId):
+    //   tool-start  → "⚙ <name>" chip appears (pending input)
+    //   tool-input  → fills in the actual command / args
+    //   tool-output → appends the returned result
+    case 'coach-tool-start':
+      addStreamingCoachToolStart(msg);
+      break;
+    case 'coach-tool-input':
+      addStreamingCoachToolInput(msg);
+      break;
+    case 'coach-tool-output':
+      addStreamingCoachToolOutput(msg);
+      break;
+
     case 'error':
       addChatMessage('Error', msg.message);
       break;
   }
+}
+
+// ── Streaming CoachBot bubble (real-time text deltas) ──
+// Keyed by stream id so a second stream firing wouldn't collide with the
+// first (we never expect more than one in flight given the relay's coach
+// queue, but the id keeps the DOM bookkeeping correct).
+const streamingCoachBubbles = new Map();  // id -> { el, bodyEl, text, ts, role }
+
+function startStreamingCoachBubble(msg) {
+  if (!msg.id) return;
+  const log = document.getElementById('coach-log');
+  if (!log) return;
+  const role = msg.role || 'assistant';
+  const ts = msg.ts || new Date().toISOString();
+
+  const div = document.createElement('div');
+  div.className = 'coach-msg ' + role + ' streaming';
+  const tsHTML = `<div class="coach-msg-ts">${new Date(ts).toLocaleTimeString()}</div>`;
+  const prefix = role === 'assistant' ? '<span class="prefix">🃏 CoachBot:</span>' : '';
+  const body = document.createElement('span');
+  body.className = 'coach-msg-body';
+  div.innerHTML = tsHTML + prefix;
+  div.appendChild(body);
+
+  const thinking = document.getElementById('coach-thinking-indicator');
+  if (thinking && thinking.parentNode === log) log.insertBefore(div, thinking);
+  else log.appendChild(div);
+
+  streamingCoachBubbles.set(msg.id, { el: div, bodyEl: body, text: '', ts, role });
+  scrollCoachIfNear();
+}
+
+function appendStreamingCoachDelta(msg) {
+  if (!msg.id || !msg.text) return;
+  const rec = streamingCoachBubbles.get(msg.id);
+  if (!rec) return;
+  rec.text += msg.text;
+  // Re-render the body with markdown (escapeHTML then the small inline
+  // markdown transformations — same as addCoachMessage's assistant path).
+  rec.bodyEl.innerHTML = renderCoachMarkdown(escapeHTML(rec.text));
+  scrollCoachIfNear();
+}
+
+// Tool call rendering, keyed by toolUseId so delayed events attach to the
+// right DOM node.
+//
+// Two shapes:
+//   A. Read — a single inline chip ("📖 Read <file>"). No cmd/output body,
+//      no click-to-expand: the output is the file content itself (large,
+//      noisy), and the user just cares WHAT was read, not the full dump.
+//   B. Bash / everything else — a collapsible block. Header shows tool
+//      name, click to reveal the command + output.
+//
+// Filtering rules on top:
+//   - Bash `/action` curl: the block is created then hidden in the Input
+//     handler (plumbing, not coaching).
+function getOrCreateToolBlock(streamId, toolUseId, name) {
+  const rec = streamingCoachBubbles.get(streamId);
+  if (!rec) return null;
+  if (!rec.tools) rec.tools = new Map();  // toolUseId -> DOM refs
+  const existing = rec.tools.get(toolUseId);
+  if (existing) return existing;
+
+  // Read → lightweight inline chip. Minimal DOM, no cmd/out, no click.
+  if (name === 'Read') {
+    const chip = document.createElement('span');
+    chip.className = 'coach-read-chip';
+    chip.textContent = '📖 Read';
+    rec.el.appendChild(chip);
+    const refs = { block: chip, chip, name, isRead: true };
+    rec.tools.set(toolUseId, refs);
+    scrollCoachIfNear();
+    return refs;
+  }
+
+  // Default → collapsible block.
+  const block = document.createElement('div');
+  block.className = 'coach-tool-block collapsed';
+  const header = document.createElement('div');
+  header.className = 'coach-tool-header';
+  header.innerHTML = `<span class="coach-tool-caret">▸</span> ⚙ ${escapeHTML(name || 'tool')}`;
+  header.title = '点击展开 / 折叠';
+  header.addEventListener('click', () => {
+    block.classList.toggle('collapsed');
+    const caret = header.querySelector('.coach-tool-caret');
+    if (caret) caret.textContent = block.classList.contains('collapsed') ? '▸' : '▾';
+  });
+  const cmd = document.createElement('pre');
+  cmd.className = 'coach-tool-cmd hidden';
+  const out = document.createElement('pre');
+  out.className = 'coach-tool-out hidden';
+  block.appendChild(header);
+  block.appendChild(cmd);
+  block.appendChild(out);
+  rec.el.appendChild(block);
+  const refs = { block, header, cmd, out, name };
+  rec.tools.set(toolUseId, refs);
+  scrollCoachIfNear();
+  return refs;
+}
+
+function addStreamingCoachToolStart(msg) {
+  if (!msg.id || !msg.toolUseId) return;
+  getOrCreateToolBlock(msg.id, msg.toolUseId, msg.name);
+}
+
+function addStreamingCoachToolInput(msg) {
+  if (!msg.id || !msg.toolUseId) return;
+  const refs = getOrCreateToolBlock(msg.id, msg.toolUseId, msg.name);
+  if (!refs) return;
+
+  // Read — just update the inline chip to show the file path (basename if
+  // deep). Skip all the cmd/output rendering.
+  if (refs.isRead) {
+    const fp = msg.input && msg.input.file_path;
+    if (typeof fp === 'string' && fp) {
+      // Shorten to the last two path segments to save space (e.g.
+      // `poker-strategy/strategy/preflop.md` instead of full absolute).
+      const parts = fp.split('/').filter(Boolean);
+      const short = parts.length > 2 ? parts.slice(-2).join('/') : fp;
+      refs.chip.textContent = `📖 ${short}`;
+      refs.chip.title = fp;  // full path on hover
+    }
+    return;
+  }
+
+  // Hide the "submit action" curl — game plumbing, not coaching content.
+  // Matches both the relay POST (localhost:3456/action) and any direct
+  // upstream POST (localhost:3457/action). When hidden, the matching
+  // tool-output is also suppressed (see addStreamingCoachToolOutput).
+  if (refs.name === 'Bash' && msg.input && typeof msg.input.command === 'string') {
+    if (/localhost:34(56|57)\/action\b/.test(msg.input.command)) {
+      refs.block.classList.add('hidden-tool');
+      return;
+    }
+  }
+  // For Bash, show the command. For others, compact JSON of input.
+  let text;
+  if (refs.name === 'Bash' && msg.input && typeof msg.input.command === 'string') {
+    text = '$ ' + msg.input.command;
+  } else {
+    try { text = JSON.stringify(msg.input || {}, null, 2); } catch { text = String(msg.input); }
+  }
+  refs.cmd.textContent = text;
+  refs.cmd.classList.remove('hidden');
+  scrollCoachIfNear();
+}
+
+function addStreamingCoachToolOutput(msg) {
+  if (!msg.id || !msg.toolUseId) return;
+  const rec = streamingCoachBubbles.get(msg.id);
+  if (!rec || !rec.tools) return;
+  const refs = rec.tools.get(msg.toolUseId);
+  if (!refs) return;
+  // Read → chip only, file content is noise.
+  if (refs.isRead) return;
+  // Skip the output for filtered-out action-submission tool blocks.
+  if (refs.block.classList.contains('hidden-tool')) return;
+  refs.out.textContent = '→ ' + (msg.content || '');
+  refs.out.classList.remove('hidden');
+  scrollCoachIfNear();
+}
+
+function finalizeStreamingCoachBubble(msg) {
+  if (!msg.id) return;
+  const rec = streamingCoachBubbles.get(msg.id);
+  if (!rec) return;
+  rec.el.classList.remove('streaming');
+  // Prefer server-provided canonical content if it's longer (result.result
+  // often matches the stream exactly, but guard against truncation).
+  const finalText = (msg.content && msg.content.length > rec.text.length) ? msg.content : rec.text;
+  rec.bodyEl.innerHTML = renderCoachMarkdown(escapeHTML(finalText));
+  // Persist to localStorage so a page refresh within the same game restores it.
+  persistCoachMessage({ role: rec.role, content: finalText, ts: rec.ts });
+  streamingCoachBubbles.delete(msg.id);
 }
 
 // ══════════════════════════════════════════════════
@@ -1304,6 +1667,42 @@ function renderCoachMarkdown(s) {
   return s;
 }
 
+// ── Coach-log scroll gating ──
+// Auto-scroll ONLY when the user is already pinned near the bottom. If they
+// scrolled up to read earlier content, preserve that position and surface a
+// floating "↓ 新消息" button so they can jump back on demand.
+const COACH_SCROLL_SLACK_PX = 80;
+function coachIsNearBottom(log) {
+  if (!log) return true;
+  return (log.scrollHeight - log.scrollTop - log.clientHeight) < COACH_SCROLL_SLACK_PX;
+}
+function showCoachScrollBtn() {
+  const btn = document.getElementById('coach-scroll-btn');
+  if (btn) btn.classList.remove('hidden');
+}
+function hideCoachScrollBtn() {
+  const btn = document.getElementById('coach-scroll-btn');
+  if (btn) btn.classList.add('hidden');
+}
+function scrollCoachToBottom() {
+  const log = document.getElementById('coach-log');
+  if (!log) return;
+  log.scrollTop = log.scrollHeight;
+  hideCoachScrollBtn();
+}
+// Call this from any spot that used to do `log.scrollTop = log.scrollHeight`.
+// Preserves position when the user has scrolled up; shows the jump button.
+function scrollCoachIfNear() {
+  const log = document.getElementById('coach-log');
+  if (!log) return;
+  if (coachIsNearBottom(log)) {
+    log.scrollTop = log.scrollHeight;
+    hideCoachScrollBtn();
+  } else {
+    showCoachScrollBtn();
+  }
+}
+
 function addCoachMessage(msg, opts) {
   const log = document.getElementById('coach-log');
   if (!log) return;
@@ -1352,7 +1751,12 @@ function addCoachMessage(msg, opts) {
 
   if (thinking) log.insertBefore(div, thinking);
   else log.appendChild(div);
-  log.scrollTop = log.scrollHeight;
+  // User-sent bubbles always snap to bottom (they just submitted; the input
+  // is below the log, so they're expecting to see their message). For
+  // assistant / log / hydration, only scroll if the user is pinned near
+  // the bottom — otherwise they scrolled up intentionally.
+  if (role === 'user') scrollCoachToBottom();
+  else scrollCoachIfNear();
   // Cap history
   while (log.children.length > 200) log.removeChild(log.firstChild);
 
@@ -1409,7 +1813,7 @@ function setCoachThinking(on) {
       indicator.className = 'coach-thinking';
       indicator.innerHTML = '🃏 CoachBot 思考中<span class="dots"></span>';
       log.appendChild(indicator);
-      log.scrollTop = log.scrollHeight;
+      scrollCoachIfNear();
     }
     if (input) input.disabled = true;
     if (sendBtn) sendBtn.disabled = true;
@@ -1696,9 +2100,13 @@ window.addEventListener('resize', () => {
 // ══════════════════════════════════════════════════
 drawZoneLines(); // Static — only needs to run once
 
-// Cmd/Ctrl+Enter sends the coach input
+// Enter sends, Shift+Enter inserts newline (chat convention).
+// `isComposing` guard: when a CJK IME is open (picking candidate for 中文
+// input), the Enter that commits the candidate must NOT submit the form —
+// it's composition input, not a chat send. `keyCode === 229` covers older
+// browsers that don't set isComposing on the actual keydown.
 document.getElementById('coach-input')?.addEventListener('keydown', (e) => {
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
     e.preventDefault();
     askCoach();
   }
@@ -1707,6 +2115,21 @@ document.getElementById('coach-input')?.addEventListener('keydown', (e) => {
 // Restore coach panel from localStorage before WS connects, so chat history
 // survives page refreshes (WS broadcasts are ephemeral — no server-side log).
 hydrateCoachHistory();
+// After hydration, force-snap to the latest message so the user lands at the
+// bottom. scrollCoachIfNear in addCoachMessage keeps us pinned as each
+// historical bubble appends, but on a very tall log the first append may
+// start non-near-bottom; this is the safety net.
+scrollCoachToBottom();
+
+// Wire the floating "↓ 新消息" button to hide once the user scrolls back to
+// the bottom on their own (either by dragging the scrollbar or wheeling).
+(function () {
+  const log = document.getElementById('coach-log');
+  if (!log) return;
+  log.addEventListener('scroll', () => {
+    if (coachIsNearBottom(log)) hideCoachScrollBtn();
+  });
+})();
 
 connectWS();
 </script>

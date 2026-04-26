@@ -67,7 +67,7 @@ let lastResultHand = 0;      // dedupe hand_result trigger
 let coachBusy = false;       // don't stack requests — relay already queues, but we skip new turn prompts while one is pending
 
 // ── Retry state for rejected auto-play actions ───
-// When upstream rejects the coach's sentinel action (e.g. "Must call $60 or fold"),
+// When upstream rejects the coach's direct /action POST (e.g. "Must call $60 or fold"),
 // the server keeps the turn on us but emits no new your_turn event. Without a
 // retry path narrator's dedupe (lastTurnKey) pins the turn shut and we time out.
 // So: on an action-rejection error, stash the reason, null lastTurnKey, and
@@ -133,17 +133,52 @@ function stateSummary() {
 // NOTE: we no longer embed stateSummary() in the prompt — the relay
 // (poker-client.js /coach-ask) auto-prepends a fresh [CURRENT GAME STATE]
 // block to every question. Narrator just supplies the trigger reason.
+// Per-turn question sent to CoachBot. The [CURRENT GAME STATE] block is
+// auto-prepended by the relay (poker-client.js::buildStateBlock), so this
+// only covers the coaching-behavior directives.
+//
+// Reference CoachBot SKILL.md for teaching style — the bot loaded it at
+// session init. Inline /poker-strategy (it's tiny — 4 tools + 5 docs) so
+// the bot has concrete CLI examples without a Read call.
+//
+// Auto-play adds exactly ONE rule beyond manual: ordering (analyze → Bash).
 function buildTurnPrompt() {
   const head = langTag() + (mode === 'auto' ? ' Auto-play.' : ' Manual.');
+  const body = [
+    'It is my turn. Coach me per `.claude/skills/coachbot/SKILL.md`.',
+    '',
+    'GTO tools (run via Bash when a number would verify a judgment):',
+    '  preflop   · Open/3-bet/call decision for a hand + position',
+    '              `python .claude/skills/poker-strategy/tools/preflop.py Ah Ks BTN`',
+    '              → Action + freq (e.g. RAISE 100%)',
+    '  equity    · % win vs a villain range (optional board)',
+    '              `python .claude/skills/poker-strategy/tools/equity.py Ah Kh "QQ+" Td 7d 2c`',
+    '              → win/tie/lose %',
+    '  odds      · Is this call +EV given pot / call / equity?',
+    '              `python .claude/skills/poker-strategy/tools/odds.py 200 50 0.35`',
+    '              → need_equity / ev / profitable',
+    '  evaluator · Final hand rank from 5–7 cards',
+    '              `python .claude/skills/poker-strategy/tools/evaluator.py Ah Kh Qh Jh Th`',
+    '              → class + tiebreak',
+    '',
+    'Strategy docs — Read on-demand from `.claude/skills/poker-strategy/strategy/<name>.md`:',
+    '  preflop          · open / 3-bet / BB defend',
+    '  postflop         · range advantage, c-bet frequency',
+    '  sizing           · pot-fraction sizing, bluff-to-value ratios',
+    '  gto-fundamentals · MDF, when to deviate from GTO',
+    '  range            · narrowing villain ranges, barrel combos',
+    '',
+    'Card notation: ranks `2-9 T J Q K A`, suits `h d c s` (e.g. `Ah`=A♥ `Td`=T♦).',
+  ].join('\n');
   const tail = mode === 'auto'
-    ? '\n\nIMPORTANT: Your LAST line must be EXACTLY:\nACTION=<fold|check|call|raise> AMOUNT=<integer>\n(AMOUNT is the total raise-to value for "raise", otherwise 0.)'
+    ? '\n\nAuto-play: finish the full analysis text first, then invoke Bash to POST /action per the ★ SUBMIT block (real tool call, not markdown).'
     : '';
   let rej = '';
   if (lastRejection) {
     rej = `\n\n⚠ Your PREVIOUS action on this turn was REJECTED by the server: "${lastRejection}".\nRead the state block above carefully (callAmount / legal moves) and pick a LEGAL action this time.`;
     lastRejection = null;  // consume — only feed once per retry
   }
-  return `${head} It is my turn. Analyze the state block above and coach me.${rej}${tail}`;
+  return `${head}\n${body}${tail}${rej}`;
 }
 
 function buildReviewPrompt(handNum) {
@@ -169,8 +204,14 @@ function reviewHeadline(handNum) {
 // ── Core event handlers ──────────────────────────
 async function handleYourTurn() {
   if (!currentState || !currentState.isMyTurn) return;
-  // Dedupe: same hand + phase + callAmount → skip
-  const key = `${currentState.handNumber}:${currentState.phase}:${currentState.callAmount || 0}:${(currentState.recentActions || []).length}`;
+  // Dedupe: same hand + phase + callAmount + action count → skip.
+  // Upstream state uses `actions` (not `recentActions`). Previously this
+  // read the wrong field and always got 0, making the dedup collapse any
+  // two re-emitted your_turn events within the same phase — so after the
+  // coach checked + bot checked, the re-emit from server still hashed to
+  // the same key and narrator silently skipped it.
+  const actsLen = (currentState.actions || currentState.recentActions || []).length;
+  const key = `${currentState.handNumber}:${currentState.phase}:${currentState.callAmount || 0}:${actsLen}`;
   if (key === lastTurnKey) return;
   lastTurnKey = key;
 
@@ -183,22 +224,18 @@ async function handleYourTurn() {
   log.info(`trigger coach (your_turn, ${mode}, hand #${currentState.handNumber})`);
   try {
     // In auto mode the prompt (see buildTurnPrompt) instructs the subprocess
-    // to emit `ACTION=<op> AMOUNT=<N>` on its last line. The relay parses
-    // that sentinel, strips it from the broadcast, and forwards the action
-    // upstream — narrator just needs to verify it happened via r.action.
+    // to POST /action on the relay itself. Narrator doesn't validate whether
+    // the coach actually curled — the natural feedback loop handles it:
+    //   - succeeded → server advances, new state arrives, dedupe key changes
+    //   - illegal   → server sends 'error' ws event, handleUpstreamError retries
+    //   - refused   → turn timeout (coach chose inaction; rare in auto mode)
     const r = await relayPost('/coach-ask', {
       question: prompt,
       silent: true,
       headline: turnHeadline(),
     });
     if (!r.ok) { log.warn('coach-ask failed:', r.error); return; }
-    if (mode === 'auto') {
-      if (r.action) {
-        log.info(`auto-play → ${r.action.action}${r.action.amount != null ? ' ' + r.action.amount : ''} (forwarded by relay)`);
-      } else {
-        log.warn('auto-play: no ACTION= sentinel in reply — nothing forwarded');
-      }
-    }
+    if (mode === 'auto') log.info(`auto-play → coach invoked (hand #${currentState.handNumber})`);
   } catch (e) {
     log.warn('your_turn error:', e.message);
   } finally {

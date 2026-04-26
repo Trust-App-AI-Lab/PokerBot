@@ -26,7 +26,7 @@ Pure analysis layer. Reads game state (or user-described hands), runs GTO tools,
 **Trigger**: strategy questions ("该不该call", "EV多少"), concept explanations ("what's SPR"), hand discussions with no active game. Inside a game, `/game` invokes this per-turn for coaching output.
 
 ### `/bot-management` — Bot lifecycle
-AI bot personalities (`bots/<name>/personality.md`), claude session init (`--session-id`), and the `botmanager.sh` polling process that executes bot turns via `claude -p --resume`.
+AI bot personalities (`bots/<name>/personality.md`), claude session init (`--session-id`), and the `botmanager.js` event-driven daemon (subscribes to server WS `:3457`) that executes bot turns via `claude -p --resume` when a global `turn` broadcast arrives. `botmanager.sh` stays as the file-mode fallback for pokernow.
 **Trigger**: "add bot" / "create bot" / "remove bot" / "bot stuck". Also called internally by `/game` at startup.
 
 ### `/poker-strategy` — GTO tool library

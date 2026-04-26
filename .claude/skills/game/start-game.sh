@@ -153,11 +153,17 @@ if $START_COACH; then
     log "ERROR: claude CLI not found. Set CLAUDE_BIN in paths.env or install Claude Code."
     exit 1
   fi
-  log "CoachBot pre-warming (session: $COACH_SID)..."
-  COACH_INIT_PROMPT="Read .claude/skills/coachbot/SKILL.md and follow it throughout this session. Load /poker-strategy tier:pro (all 5 strategy docs) into context. When everything is loaded, reply exactly: load successfully"
+  # Single source of truth for CoachBot's model: `model:` in coachbot/SKILL.md
+  # frontmatter. Same file is parsed by poker-client.js::readCoachModel so
+  # both paths stay in sync. Defaults to sonnet if the field is missing.
+  COACH_SKILL_MD="$PROJECT_ROOT/.claude/skills/coachbot/SKILL.md"
+  COACH_MODEL=$(awk '/^---$/{i++;next} i==1 && /^model:[[:space:]]/{sub(/^model:[[:space:]]*/,""); sub(/[[:space:]]+$/,""); print; exit}' "$COACH_SKILL_MD" 2>/dev/null)
+  COACH_MODEL="${COACH_MODEL:-sonnet}"
+  log "CoachBot pre-warming (session: $COACH_SID, model: $COACH_MODEL)..."
+  COACH_INIT_PROMPT="Read .claude/skills/coachbot/SKILL.md and follow it throughout this session. Also read .claude/skills/poker-strategy/SKILL.md (the tiny router — tool + doc index). Do NOT bulk-load the strategy docs; per-turn you will Read individual docs on-demand when the spot touches them. When done, reply exactly: load successfully"
   COACH_OUT=$("$CLAUDE_BIN" -p "$COACH_INIT_PROMPT" \
     --session-id "$COACH_SID" \
-    --model opus \
+    --model "$COACH_MODEL" \
     --permission-mode bypassPermissions 2>&1) || true
   if echo "$COACH_OUT" | grep -qi "load successfully"; then
     log "✓ CoachBot ready"
@@ -168,11 +174,15 @@ if $START_COACH; then
   fi
 fi
 
-# ── 5. Start BotManager ──
+# ── 5. Start BotManager (event-driven: subscribes to server WS :3457) ──
 if $START_BM && [ ${#BOT_LIST[@]} -gt 0 ]; then
-  bash "$PROJECT_ROOT/.claude/skills/bot-management/botmanager.sh" --server http://localhost:3457 > /dev/null 2>&1 &
+  BM_LOG="$PROJECT_ROOT/game-data/botmanager.log"
+  mkdir -p "$(dirname "$BM_LOG")"
+  "$NODE" "$PROJECT_ROOT/.claude/skills/bot-management/botmanager.js" \
+    --server http://localhost:3457 \
+    > "$BM_LOG" 2>&1 &
   sleep 1
-  log "BotManager started (PID $(cat "$PROJECT_ROOT/.claude/skills/bot-management/.botmanager.pid" 2>/dev/null))"
+  log "BotManager started (PID $(cat "$PROJECT_ROOT/.claude/skills/bot-management/.botmanager.pid" 2>/dev/null)) — log: $BM_LOG"
 fi
 
 # ── 6. Start relay (:3456) ──

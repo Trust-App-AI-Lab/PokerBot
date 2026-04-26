@@ -85,6 +85,24 @@ const PROFILE_DIR  = path.join(PROJECT_ROOT, 'game-data', CONFIG.name);
 const STATE_FILE   = path.join(PROFILE_DIR, 'state.json');
 const HISTORY_DIR  = path.join(PROFILE_DIR, 'history');
 const TABLE_HTML   = path.join(__dirname, 'public', 'poker-table.html');
+const COACH_SKILL_MD = path.join(PROJECT_ROOT, '.claude', 'skills', 'coachbot', 'SKILL.md');
+
+// Single source of truth for CoachBot's model: the frontmatter `model:`
+// field in coachbot/SKILL.md. Both this relay and start-game.sh read the
+// same file — change model there only. Falls back to 'sonnet' if the file
+// is missing or malformed so the relay still starts.
+function readCoachModel() {
+  try {
+    const raw = fs.readFileSync(COACH_SKILL_MD, 'utf8');
+    const fm = raw.match(/^---\n([\s\S]*?)\n---/);
+    if (fm) {
+      const m = fm[1].match(/^model:\s*(\S+)\s*$/m);
+      if (m) return m[1];
+    }
+  } catch { /* fall through */ }
+  return 'sonnet';
+}
+const COACH_MODEL = readCoachModel();
 
 try {
   if (!fs.existsSync(PROFILE_DIR)) fs.mkdirSync(PROFILE_DIR, { recursive: true });
@@ -93,6 +111,13 @@ try {
   console.error(`Failed to create data directories: ${e.message}`);
   process.exit(1);
 }
+
+// Per-process game identifier. Changes every time the relay (re)starts,
+// which — under start-game.sh — means every fresh game. Sent to the browser
+// in the 'welcome' message so the UI can auto-clear its localStorage-backed
+// CoachBot chat history when it sees a new gameId (i.e. on start-game).
+// Refresh within the same process keeps the same gameId → chat survives.
+const GAME_ID = String(Date.now());
 
 // ── CoachBot session ID (matches start-game.sh: md5 of "coachbot-<name>") ──
 function deriveCoachSid(name) {
@@ -154,6 +179,29 @@ let joined = false;
 // ══════════════════════════════════════════════════
 let upstream = null;
 let reconnectTimer = null;
+
+// Fire-and-forget HTTP POST to the upstream poker-server. Used to forward
+// browser control commands (Start hand, Settings, etc.) that the upstream
+// exposes as REST endpoints rather than WS messages. Errors are logged but
+// never thrown — the browser UI will pick up state changes on the next WS
+// `state` event anyway.
+function upstreamPost(pathStr, body) {
+  try {
+    const u = new URL(pathStr, CONFIG.serverUrl.replace(/^ws/, 'http'));
+    const data = Buffer.from(JSON.stringify(body || {}));
+    const req = http.request({
+      hostname: u.hostname, port: u.port, path: u.pathname + u.search,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': data.length },
+      timeout: 2000,
+    }, res => { res.resume(); });
+    req.on('error', e => log.warn(`upstreamPost ${pathStr} failed: ${e.message}`));
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.write(data); req.end();
+  } catch (e) {
+    log.warn(`upstreamPost ${pathStr} crashed: ${e.message}`);
+  }
+}
 
 function connectUpstream() {
   log.info(`Connecting to ${CONFIG.serverUrl} as "${CONFIG.name}"...`);
@@ -590,8 +638,11 @@ const httpServer = http.createServer((req, res) => {
       // first. maybeRunMaintenance() broadcasts its own thinking/system
       // messages and never throws. When it returns the counter is reset.
       await maybeRunMaintenance();
-      // Notify browser CoachBot is thinking
-      wsBroadcast({ type: 'coach-thinking', on: true });
+      // NOTE: we skip the legacy `coach-thinking` indicator for /coach-ask
+      // because the streaming bubble (below) already shows activity via its
+      // blinking-caret animation. Firing both produces a duplicate
+      // "thinking..." row under the empty bubble. `coach-thinking` is still
+      // used by maintenance (which doesn't stream).
       try {
         // Prepend a fresh [CURRENT GAME STATE] block so the subprocess CoachBot
         // always reasons on live state, not its stale session memory (it only
@@ -599,58 +650,123 @@ const httpServer = http.createServer((req, res) => {
         // mirrors narrator.js stateSummary — bounded by delimiters so CoachBot
         // can distinguish the context block from the actual user question.
         const fullQuestion = buildStateBlock() + '\n\n' + question;
-        const reply = await runCoach(fullQuestion);
-        wsBroadcast({ type: 'coach-thinking', on: false });
-        // Strip action sentinel from last non-empty line, if present.
-        // Contract: subprocess CoachBot emits `ACTION=<op> [AMOUNT=<N>]` on the
-        // last line when the user issued an explicit action command (see
-        // /coachbot SKILL.md → "Panel Action Routing"). Relay strips it from
-        // the broadcast and internally forwards the action upstream.
-        const { cleanReply, action } = extractActionSentinel(reply);
-        wsBroadcast({
-          type: 'coach',
-          role: 'assistant',
-          content: cleanReply,
-          ts: new Date().toISOString(),
-        });
-        if (action) {
-          // ── Relay-side validation ──
-          // CoachBot's reply can be seconds late; the turn may already have
-          // passed, or it may have picked an action that's illegal given the
-          // current betting state. Catch these here instead of letting the
-          // server reject them — cleaner UX + prevents narrator retry storms.
-          const s = currentState || {};
-          const ca = s.callAmount || 0;
-          let rejectReason = null;
-          if (!s.isMyTurn) {
-            rejectReason = `Stale action — not my turn anymore (currentActor=${s.currentActor || 'none'}, phase=${s.phase || '?'}). Action dropped.`;
-          } else if (action.action === 'check' && ca > 0) {
-            rejectReason = `Illegal: "check" when callAmount=$${ca} > 0. You must call, raise, or fold.`;
-          } else if (action.action === 'call' && ca === 0) {
-            rejectReason = `Illegal: "call" when callAmount=$0. Use check instead.`;
+
+        // Stream text deltas to the browser as they arrive so the user sees
+        // the reasoning appear in real time, BEFORE the subprocess' Bash tool
+        // call lands /action on the server. Without streaming, stdout is
+        // buffered until claude exits — UI would then see action land first
+        // and analysis appear after (bad UX).
+        const streamId = `coach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const ts = new Date().toISOString();
+        // NOTE: don't broadcast `coach-stream-start` yet. If we fire it here
+        // (at request time), every queued request creates an empty bubble
+        // with a blinking cursor while it waits its turn — confusing when
+        // multiple narrator+user asks pile up. Instead, the onEvent below
+        // sends stream-start lazily on the first real event (first text
+        // delta or first tool_use). A crashed/empty claude run → no bubble.
+        let streamOpened = false;
+        const openStream = () => {
+          if (streamOpened) return;
+          streamOpened = true;
+          wsBroadcast({ type: 'coach-stream-start', id: streamId, role: 'assistant', ts });
+        };
+
+        // Tool-call bookkeeping per stream: content_block events carry only
+        // `index`, so we track index → { type, toolUseId, name, partialJson }
+        // to reassemble input across delta events and attach tool_result
+        // (which arrives via a separate `user` message keyed by tool_use_id).
+        const blocks = new Map();
+
+        const onEvent = (evt) => {
+          if (evt.type === 'stream_event' && evt.event) {
+            const se = evt.event;
+            // Block start: register; if tool_use, tell UI
+            if (se.type === 'content_block_start' && se.content_block) {
+              const cb = se.content_block;
+              blocks.set(se.index, {
+                type: cb.type,
+                toolUseId: cb.id,
+                name: cb.name,
+                partial: '',
+              });
+              if (cb.type === 'tool_use') {
+                openStream();
+                wsBroadcast({
+                  type: 'coach-tool-start',
+                  id: streamId,
+                  toolUseId: cb.id,
+                  name: cb.name || '?',
+                });
+              }
+            }
+            // Deltas: text → push to UI; input_json → accumulate
+            else if (se.type === 'content_block_delta' && se.delta) {
+              if (se.delta.type === 'text_delta') {
+                openStream();
+                wsBroadcast({ type: 'coach-delta', id: streamId, text: se.delta.text || '' });
+              } else if (se.delta.type === 'input_json_delta') {
+                const block = blocks.get(se.index);
+                if (block && block.type === 'tool_use') {
+                  block.partial += se.delta.partial_json || '';
+                }
+              }
+            }
+            // Block stop: if it was a tool_use, parse the accumulated JSON
+            // and push the final input down to UI.
+            else if (se.type === 'content_block_stop') {
+              const block = blocks.get(se.index);
+              if (block && block.type === 'tool_use') {
+                let input = {};
+                try { input = JSON.parse(block.partial || '{}'); } catch {}
+                wsBroadcast({
+                  type: 'coach-tool-input',
+                  id: streamId,
+                  toolUseId: block.toolUseId,
+                  input,
+                });
+              }
+            }
           }
-          if (rejectReason) {
-            log.warn(`CoachBot action rejected by relay: ${JSON.stringify(action)} — ${rejectReason}`);
-            wsBroadcast({
-              type: 'coach',
-              role: 'error',
-              content: `⚠ Action dropped: ${rejectReason}`,
-              ts: new Date().toISOString(),
-            });
-          } else if (upstream && upstream.readyState === WebSocket.OPEN) {
-            upstream.send(JSON.stringify({ type: 'action', ...action }));
-            log.info(`CoachBot sentinel → forwarded action: ${JSON.stringify(action)}`);
-          } else {
-            wsBroadcast({
-              type: 'coach',
-              role: 'error',
-              content: 'CoachBot action dropped — not connected to server.',
-              ts: new Date().toISOString(),
-            });
+          // Tool result: arrives as a `user` message (not a stream_event).
+          // Forward the text portion per tool_use_id so UI can attach it to
+          // the right tool chip. Truncate large outputs at 4 KB.
+          else if (evt.type === 'user' && evt.message && Array.isArray(evt.message.content)) {
+            for (const c of evt.message.content) {
+              if (c.type === 'tool_result') {
+                let text = '';
+                if (typeof c.content === 'string') text = c.content;
+                else if (Array.isArray(c.content)) {
+                  text = c.content
+                    .filter(x => x && x.type === 'text')
+                    .map(x => x.text || '').join('\n');
+                }
+                if (text.length > 4096) text = text.slice(0, 4096) + '\n…(truncated)';
+                wsBroadcast({
+                  type: 'coach-tool-output',
+                  id: streamId,
+                  toolUseId: c.tool_use_id,
+                  content: text,
+                });
+              }
+            }
           }
+        };
+
+        // Narrator auto-asks always come with `silent: true` (headline only,
+        // no user message echo). A non-silent call means the user typed the
+        // question — prioritize it so narrator's backlog of auto-turns
+        // doesn't force the user to wait.
+        const reply = await runCoach(fullQuestion, onEvent, !silent);
+        // If the subprocess exited without ever streaming (no text, no
+        // tool_use — e.g. empty reply), openStream never fired, so there's
+        // no UI bubble to finalize. Skip the end event to avoid a dangling
+        // stream-end targeting a non-existent bubble.
+        if (streamOpened) {
+          wsBroadcast({ type: 'coach-stream-end', id: streamId, content: reply, ts });
         }
+        wsBroadcast({ type: 'coach-thinking', on: false });
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, content: cleanReply, action: action || null }));
+        res.end(JSON.stringify({ ok: true, content: reply }));
       } catch (e) {
         wsBroadcast({ type: 'coach-thinking', on: false });
         wsBroadcast({
@@ -697,6 +813,7 @@ wss.on('connection', (clientWs) => {
     players: currentState ? (currentState.players || []).map(p => ({ name: p.name, stack: p.stack })) : [],
     serverType: 'poker-client',
     autoJoinName: CONFIG.name,
+    gameId: GAME_ID,
   });
 
   if (currentState) {
@@ -722,6 +839,18 @@ wss.on('connection', (clientWs) => {
       } else if (msg.type === 'action' && upstream && upstream.readyState === WebSocket.OPEN) {
         // Forward action to upstream
         upstream.send(JSON.stringify(msg));
+      } else if (msg.type === 'start') {
+        // Browser's "Start" button (host deals the next hand). Upstream
+        // exposes this as HTTP POST /start — forward over a small local
+        // request. Non-blocking, fire-and-forget.
+        upstreamPost('/start', {});
+      } else if (msg.type === 'settings') {
+        // Browser's settings panel Apply → HTTP POST /config on upstream.
+        upstreamPost('/config', {
+          smallBlind: msg.smallBlind,
+          bigBlind:   msg.bigBlind,
+          autoStart:  msg.autoStart,
+        });
       }
     } catch (e) {
       log.warn(`Failed to handle browser message: ${e.message}`);
@@ -755,18 +884,23 @@ const coachQueue = [];
 let coachBusy = false;
 let coachSessionReady = false;  // becomes true after first successful spawn
 
-// Init prompt used when the session doesn't exist yet (first run without start-game.sh
-// pre-warm, or after a manual session wipe). Mirrors start-game.sh pre-warm.
+// Init prompt used when the session doesn't exist yet (first run without
+// start-game.sh pre-warm, or after a manual session wipe). Mirrors
+// start-game.sh pre-warm: load the two SKILL.md routers only, then let the
+// bot Read individual strategy docs on-demand per turn (CoachBot SKILL.md
+// explicitly calls out "don't bulk-load — compaction drift blurs pre-loaded
+// content").
 const COACH_INIT_PROMPT =
   'Read .claude/skills/coachbot/SKILL.md and follow it throughout this session. ' +
-  'Load /poker-strategy tier:pro (all 5 strategy docs) into context. ' +
+  'Also Read .claude/skills/poker-strategy/SKILL.md — tiny router (tools + doc index). ' +
+  'Do NOT bulk-load the strategy docs; per-turn Read individual docs on-demand when the spot calls for them. ' +
   'When ready, wait for the user\'s next message.';
 
 // ── Periodic session maintenance ──────────────────────────────
 // Long sessions drift: the transcript grows, Claude Code may compact early
 // turns (dropping the SKILL.md tool-result we seeded at init), and we start
-// seeing symptoms — missing 🃏 prefix, forgotten legal-action rules, bad
-// ACTION= sentinel format.
+// seeing symptoms — forgotten legal-action rules, skipped action curls,
+// language-routing regressions.
 //
 // Every COMPACT_INTERVAL invocations of runCoach() we fire a maintenance
 // turn that (1) forces the model to self-summarize (compaction) and (2)
@@ -775,23 +909,41 @@ const COACH_INIT_PROMPT =
 // maintenance turn itself doesn't count.
 let coachInvocationCount = 0;
 let maintenanceInFlight = false;
-const COMPACT_INTERVAL = parseInt(process.env.COACH_COMPACT_INTERVAL || '15', 10);
+// Every COMPACT_INTERVAL user-facing /coach-ask invocations we fire a
+// compaction turn (see MAINTENANCE_PROMPT). 30 was picked to cut the
+// chance a maintenance run overlaps a user question roughly in half
+// compared to the old 15. Sonnet maintenance ~15-20s — still short
+// enough to not matter much when it does hit.
+const COMPACT_INTERVAL = parseInt(process.env.COACH_COMPACT_INTERVAL || '30', 10);
 const MAINTENANCE_PROMPT = [
-  '[SESSION MAINTENANCE — no user question this turn, no ACTION= sentinel]',
+  '[SESSION MAINTENANCE — no user question this turn, do NOT call /action]',
   '',
   'Your session transcript is getting long. Do the following to stay sharp:',
   '',
   '1. Summarize in 3–5 bullets what you\'ve learned about the user\'s play so far (leaks, strengths, recurring spots, villain reads). Keep it brief — this is compaction, not analysis.',
-  '2. Re-Read `.claude/skills/coachbot/SKILL.md` to refresh: identity prefix (🃏 CoachBot:), tool-tagging (⚙/📖), language routing, legal-action rules, ACTION= sentinel contract.',
+  '2. Re-Read `.claude/skills/coachbot/SKILL.md` AND `.claude/skills/poker-strategy/SKILL.md` to refresh: tool-tagging (⚙/📖), language routing, GTO analysis flow, tool/doc router.',
   '3. Reply with this line, nothing else:',
   '   refreshed',
   '',
-  'Do NOT emit an ACTION= sentinel. Do NOT analyze the current hand. Just summarize → re-read → confirm.',
+  'Do NOT curl /action. Do NOT analyze the current hand. Just summarize → re-read → confirm.',
 ].join('\n');
 
-function runCoach(question) {
+// Queue a CoachBot call. Serialized against COACH_SID (same session can't
+// take parallel --resume without corruption), but priority-aware:
+//   - Default (priority=false): background auto-play asks from narrator —
+//     pushed to the end, fire-and-forget, user doesn't miss them.
+//   - priority=true: user typed into the chat input. Jumps the queue so
+//     narrator's pending auto-asks don't make the user wait 30-60s to see
+//     a reply. Still serialized against the currently-running claude -p
+//     (can't preempt a running subprocess), but lands next.
+// Optional `onEvent` callback turns on stream-json output so the caller sees
+// events as they arrive (text_delta, tool_use, etc.). Resolves with the
+// final assistant text (accumulated from text_delta events or result.result).
+function runCoach(question, onEvent, priority = false) {
   return new Promise((resolve, reject) => {
-    coachQueue.push({ question, resolve, reject });
+    const item = { question, resolve, reject, onEvent };
+    if (priority) coachQueue.unshift(item);
+    else coachQueue.push(item);
     drainCoachQueue();
   });
 }
@@ -810,6 +962,9 @@ async function maybeRunMaintenance() {
   }
   maintenanceInFlight = true;
   log.info(`CoachBot maintenance starting (invocations=${coachInvocationCount}, interval=${COMPACT_INTERVAL})`);
+  // Dedicated banner event so UI can show a persistent top strip during
+  // maintenance (in addition to the one-off system chat line below).
+  wsBroadcast({ type: 'coach-maintenance', on: true });
   wsBroadcast({
     type: 'coach',
     role: 'system',
@@ -845,6 +1000,7 @@ async function maybeRunMaintenance() {
     });
   } finally {
     wsBroadcast({ type: 'coach-thinking', on: false });
+    wsBroadcast({ type: 'coach-maintenance', on: false });
     maintenanceInFlight = false;
   }
 }
@@ -876,7 +1032,7 @@ function buildStateBlock() {
   // Legal-action derivation — mirrors the UI button logic in poker-table.html:
   //   callAmount === 0 → { check, fold, (bet minR-maxR if canRaise) }
   //   callAmount  > 0  → { call ca, fold, (raise minR-maxR if canRaise) }
-  // Explicit list prevents CoachBot from emitting ACTION=check when a bet is
+  // Explicit list prevents CoachBot from curling `check` when a bet is
   // outstanding (previous bug: "Must call $100 or fold" rejections).
   let turnLine;
   if (s.isMyTurn) {
@@ -898,9 +1054,14 @@ function buildStateBlock() {
       ? '  ⚠ "check" is ILLEGAL here — you must call, raise, or fold.'
       : '';
     turnLine = `\n★ MY TURN — callAmount=$${ca} minRaise=$${minR} maxRaise=$${maxR}`
-             + `\n★ LEGAL ACTIONS: ${legal.join(' | ')}${warn}`;
+             + `\n★ LEGAL ACTIONS: ${legal.join(' | ')}${warn}`
+             + `\n★ SUBMIT (only on explicit user instruction or in auto-play mode):`
+             + `\n    curl -s -X POST localhost:3456/action -H 'Content-Type: application/json' -d '<payload>'`
+             + `\n    Payloads: {"action":"fold"} | {"action":"check"} | {"action":"call"}`
+             + `\n            | {"action":"bet","amount":N} | {"action":"raise","amount":N}   (N = TOTAL bet, not delta)`
+             + `\n    Must match ★ LEGAL ACTIONS above. Don't narrate the curl.`;
   } else if (s.currentActor) {
-    turnLine = `\nCurrent actor: ${s.currentActor} (NOT my turn — do NOT emit an ACTION= sentinel)`;
+    turnLine = `\nCurrent actor: ${s.currentActor} (NOT my turn — do NOT curl /action)`;
   } else {
     turnLine = '';
   }
@@ -918,46 +1079,51 @@ function buildStateBlock() {
   ].join('\n');
 }
 
-// Parse the last non-empty line of a CoachBot reply for an action sentinel.
-// Contract: `ACTION=<op> [AMOUNT=<N>]` where <op> ∈ fold|check|call|raise|bet.
-// For raise/bet the AMOUNT is required (absolute total bet size). Returns
-// { cleanReply, action } — if no sentinel, cleanReply === reply and action === null.
-function extractActionSentinel(reply) {
-  if (!reply || typeof reply !== 'string') return { cleanReply: reply, action: null };
-  const lines = reply.split('\n');
-  // Find last non-empty line
-  let idx = lines.length - 1;
-  while (idx >= 0 && lines[idx].trim() === '') idx--;
-  if (idx < 0) return { cleanReply: reply, action: null };
-  const last = lines[idx].trim();
-  const m = last.match(/^ACTION=(fold|check|call|raise|bet)(?:\s+AMOUNT=(\d+))?$/i);
-  if (!m) return { cleanReply: reply, action: null };
-  const op = m[1].toLowerCase();
-  const amt = m[2] ? parseInt(m[2], 10) : undefined;
-  // raise/bet require an amount; if missing, treat as invalid sentinel
-  if ((op === 'raise' || op === 'bet') && (amt === undefined || !Number.isFinite(amt))) {
-    return { cleanReply: reply, action: null };
-  }
-  // Strip the sentinel line (and any trailing blank lines above it)
-  lines.splice(idx);
-  while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
-  const cleanReply = lines.join('\n');
-  const action = { action: op };
-  if (amt !== undefined) action.amount = amt;
-  return { cleanReply, action };
-}
-
 // Spawn claude with the given args. Returns { code, stdout, stderr }.
-function spawnClaude(args) {
+// Spawn `claude -p`. Two modes:
+//   - Plain text (no onEvent): stdout is the final assistant message verbatim.
+//     Used by init + maintenance paths.
+//   - Streaming (onEvent provided): caller also appended
+//     `--output-format stream-json --verbose --include-partial-messages` to
+//     args. Each stdout line is one JSON event; onEvent fires per event so
+//     the caller can forward text deltas / tool_use markers to the browser
+//     in real time. The returned `assistantText` is the concatenated text
+//     across all assistant content blocks (preferring result.result when it
+//     arrives, which is the canonical final reply).
+function spawnClaude(args, onEvent) {
   return new Promise((resolve, reject) => {
     const proc = spawn(CLAUDE_BIN, args, {
       cwd: PROJECT_ROOT,
       stdio: ['ignore', 'pipe', 'pipe'],  // no stdin — -p takes prompt as arg
     });
-    let stdout = '', stderr = '';
-    proc.stdout.on('data', d => { stdout += d.toString(); });
+    let stdout = '', stderr = '', assistantText = '';
+    let buf = '';
+    proc.stdout.on('data', d => {
+      const chunk = d.toString();
+      stdout += chunk;
+      if (!onEvent) return;
+      buf += chunk;
+      let idx;
+      while ((idx = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, idx);
+        buf = buf.slice(idx + 1);
+        if (!line.trim()) continue;
+        let evt;
+        try { evt = JSON.parse(line); } catch { continue; }
+        try { onEvent(evt); } catch (e) { /* swallow handler errors */ }
+        // Accumulate assistant text for the return value.
+        if (evt.type === 'stream_event'
+            && evt.event && evt.event.type === 'content_block_delta'
+            && evt.event.delta && evt.event.delta.type === 'text_delta') {
+          assistantText += evt.event.delta.text || '';
+        } else if (evt.type === 'result' && typeof evt.result === 'string') {
+          // Final canonical reply — prefer it over delta-accumulated if longer.
+          if (evt.result.length > assistantText.length) assistantText = evt.result;
+        }
+      }
+    });
     proc.stderr.on('data', d => { stderr += d.toString(); });
-    proc.on('close', code => resolve({ code, stdout, stderr }));
+    proc.on('close', code => resolve({ code, stdout, stderr, assistantText }));
     proc.on('error', err => reject(err));
   });
 }
@@ -971,20 +1137,30 @@ function isSessionMissing(stderr) {
 async function drainCoachQueue() {
   if (coachBusy || coachQueue.length === 0) return;
   coachBusy = true;
-  const { question, resolve, reject } = coachQueue.shift();
+  const { question, resolve, reject, onEvent } = coachQueue.shift();
 
   try {
     const baseArgs = [
-      '--model', 'opus',
+      // Model is read from coachbot/SKILL.md frontmatter at relay startup.
+      // Single source of truth — change the `model:` field there only.
+      '--model', COACH_MODEL,
       '--permission-mode', 'bypassPermissions',
     ];
+    // Streaming mode requires these; init call below stays plain text.
+    const streamArgs = onEvent
+      ? ['--output-format', 'stream-json', '--verbose', '--include-partial-messages']
+      : [];
 
     // Try --resume first. If session missing, initialize with --session-id + init prompt,
     // then retry the user question with --resume.
-    let result = await spawnClaude(['-p', question, '--resume', COACH_SID, ...baseArgs]);
+    let result = await spawnClaude(
+      ['-p', question, '--resume', COACH_SID, ...baseArgs, ...streamArgs],
+      onEvent
+    );
 
     if (result.code !== 0 && isSessionMissing(result.stderr)) {
       log.info(`CoachBot session ${COACH_SID} not found — initializing...`);
+      // Init is small + user doesn't need to see it streamed; plain mode.
       const init = await spawnClaude([
         '-p', COACH_INIT_PROMPT,
         '--session-id', COACH_SID,
@@ -995,13 +1171,18 @@ async function drainCoachQueue() {
       }
       log.info('✓ CoachBot session initialized');
       coachSessionReady = true;
-      // Retry the actual question
-      result = await spawnClaude(['-p', question, '--resume', COACH_SID, ...baseArgs]);
+      // Retry the actual question (re-streamed if caller asked for it).
+      result = await spawnClaude(
+        ['-p', question, '--resume', COACH_SID, ...baseArgs, ...streamArgs],
+        onEvent
+      );
     }
 
     if (result.code === 0) {
       coachSessionReady = true;
-      resolve(result.stdout.trim());
+      // Streaming mode: stdout is NDJSON; use assistantText (accumulated from
+      // text deltas / result event). Plain mode: stdout is the reply itself.
+      resolve((onEvent ? result.assistantText : result.stdout).trim());
     } else {
       reject(new Error(result.stderr.trim() || `claude exited ${result.code}`));
     }

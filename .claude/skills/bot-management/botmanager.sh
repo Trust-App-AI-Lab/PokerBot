@@ -1,6 +1,12 @@
 #!/bin/bash
-# botmanager.sh — Bot Decision Executor (polling loop only)
-# CC handles bot init + join. BotManager just polls and resumes sessions.
+# botmanager.sh — Bot Decision Executor (polling loop, file-mode fallback)
+#
+# ⚠ HTTP mode has moved to botmanager.js (event-driven WS subscription).
+#   start-game.sh now launches botmanager.js by default.
+#   This script remains for:
+#     - file mode (pokernow runtime writes pending-turns.json)
+#     - manual debugging when Node isn't available
+#   The HTTP-mode branch below still works but is no longer the canonical path.
 #
 # Usage:
 #   bash .claude/skills/bot-management/botmanager.sh --server localhost:3457 &
@@ -26,6 +32,7 @@ run_with_timeout() {
   fi
 }
 PROMPT_TURN="$PROJECT_ROOT/.claude/skills/bot-management/botmanager-turn.md"
+BOTS_DIR="$PROJECT_ROOT/.claude/skills/bot-management/bots"
 PID_FILE="$PROJECT_ROOT/.claude/skills/bot-management/.botmanager.pid"
 LOG_FILE="$PROJECT_ROOT/.claude/skills/bot-management/.botmanager.log"
 
@@ -70,7 +77,6 @@ if [ "$MODE" = "file" ] && [ ! -f "$GAME" ]; then
   log "ERROR: game.json not found (file mode). Write game.json first."
   exit 1
 fi
-PROMPT_INIT="$PROJECT_ROOT/.claude/skills/bot-management/botmanager-init.md"
 
 # Python (paths.env may have set $PY already)
 PY="${PY:-python3}"
@@ -143,13 +149,18 @@ except Exception:
   echo "$actor"
 }
 
-# ── Helper: get model from personality.md ──
+# ── Helpers: extract model from frontmatter + strip frontmatter for body ──
+# Frontmatter: YAML between the first two --- fences. Only `model` is read.
+# Everything after the 2nd fence is the personality body (character + toolkit).
 get_bot_model() {
-  local bot="$1"
-  local personality="$PROJECT_ROOT/.claude/skills/bot-management/bots/$bot/personality.md"
-  if [ -f "$personality" ]; then
-    sed -n 's/^- \*\*Model\*\*: \([[:alnum:]_-]*\).*/\1/p' "$personality" 2>/dev/null | head -1
-  fi
+  local path="$BOTS_DIR/$1/personality.md"
+  [ -f "$path" ] || return 1
+  awk 'BEGIN{fm=0} /^---$/{fm++; next} fm==1 && /^model:/{sub(/^model:[[:space:]]*/,""); print; exit}' "$path"
+}
+get_bot_body() {
+  local path="$BOTS_DIR/$1/personality.md"
+  [ -f "$path" ] || return 1
+  awk 'BEGIN{fm=0} /^---$/{fm++; next} fm>=2' "$path"
 }
 
 # ── Helper: portable md5 hex digest (Mac `md5` / Linux `md5sum` differ).
@@ -170,50 +181,50 @@ bot_session_id() {
   _md5_hex "pokerbot-$bot" | sed 's/\(.\{8\}\)\(.\{4\}\)\(.\{4\}\)\(.\{4\}\)\(.\{12\}\).*/\1-\2-\3-\4-\5/'
 }
 
-# ── Session tracking (space-delimited list of initialized bot names) ──
-# Using a flat string for bash 3.2 compat on Mac (assoc arrays need bash 4+)
+# ── Session tracking ──
+# Once a bot has had its first turn, we use --resume on subsequent turns so
+# in-game observations (previous hands, opponent reads) carry forward.
+# The full turn prompt (turn.md + personality body) is re-injected every turn —
+# memory drift over a long game can't erode what's re-stated each turn.
 BOT_SESSIONS=" "
-bot_is_initialized() { [[ "$BOT_SESSIONS" == *" $1 "* ]]; }
-bot_mark_initialized() { BOT_SESSIONS="$BOT_SESSIONS$1 "; }
+bot_has_session()   { [[ "$BOT_SESSIONS" == *" $1 "* ]]; }
+bot_mark_session()  { BOT_SESSIONS="$BOT_SESSIONS$1 "; }
 
-# ── Helper: initialize a bot session ──
-init_bot() {
+# ── Helper: build the per-turn prompt for a bot ──
+# Assembly: turn.md + personality body (= character + pre-rendered toolkit) + state + env.
+# State JSON is fetched here (not by the bot) — BotManager already polls /state to know
+# it's this bot's turn, so we just re-fetch with ?player=$bot to get the hole-cards view
+# and push it in the prompt. Bot never curls /state itself. All tool/doc descriptions
+# live in each personality.md — script stays pure concat + one state fetch.
+build_turn_prompt() {
   local bot="$1"
-  local model="$2"
-  local sid
-  sid=$(bot_session_id "$bot")
-  local model_flag=""
-  if [ -n "$model" ]; then model_flag="--model $model"; fi
+  local body state
+  body=$(get_bot_body "$bot") || return 1
+  state=$(curl -s --max-time 2 "$SERVER_URL/state?player=$bot" 2>/dev/null)
+  [ -z "$state" ] && { log "✗ /state fetch empty for $bot"; return 1; }
 
-  # Bot sessions use a deterministic UUID per bot name. If the session
-  # already exists from a prior run, claude CLI errors with "already in use"
-  # — we treat that as "already initialized" and reuse the existing session.
-  log "Initializing $bot (model: ${model:-default}, session: $sid)..."
-  local result
-  result=$(run_with_timeout 120 "$CLAUDE_BIN" -p "$(cat "$PROMPT_INIT")
-
-SERVER_URL=$SERVER_URL
-BOT_NAME=$bot" \
-    --session-id "$sid" \
-    $model_flag \
-    --permission-mode bypassPermissions \
-    2>&1) || true
-
-  if echo "$result" | grep -qi "load successfully"; then
-    bot_mark_initialized "$bot"
-    log "✓ $bot initialized successfully"
-    return 0
-  elif echo "$result" | grep -qi "already in use"; then
-    bot_mark_initialized "$bot"
-    log "✓ $bot session already exists — reusing"
-    return 0
-  else
-    log "✗ $bot init failed: $result"
-    return 1
-  fi
+  cat "$PROMPT_TURN"
+  echo
+  echo "---"
+  echo
+  echo "$body"
+  echo
+  echo "---"
+  echo
+  echo "SERVER_URL=$SERVER_URL"
+  echo "BOT_NAME=$bot"
+  echo
+  echo "## State"
+  echo
+  echo '```json'
+  echo "$state"
+  echo '```'
 }
 
-# ── Helper: invoke bot turn via resume ──
+# ── Helper: invoke a bot turn ──
+# First turn for a bot: creates session with --session-id (no --resume).
+# Subsequent turns: uses --resume to continue the session.
+# Personality body + router are re-injected in the prompt every turn regardless.
 invoke_bot_turn() {
   local bot="$1"
   local model="$2"
@@ -222,14 +233,43 @@ invoke_bot_turn() {
   local model_flag=""
   if [ -n "$model" ]; then model_flag="--model $model"; fi
 
-  run_with_timeout 90 "$CLAUDE_BIN" -p "$(cat "$PROMPT_TURN")
+  local prompt
+  prompt=$(build_turn_prompt "$bot") || { log "✗ build_turn_prompt failed for $bot"; return 1; }
 
-SERVER_URL=$SERVER_URL
-BOT_NAME=$bot" \
-    --resume "$sid" \
+  local session_flag
+  if bot_has_session "$bot"; then
+    session_flag="--resume $sid"
+  else
+    session_flag="--session-id $sid"
+  fi
+
+  run_with_timeout 120 "$CLAUDE_BIN" -p "$prompt" \
+    $session_flag \
     $model_flag \
     --permission-mode bypassPermissions \
-    2>> "$LOG_FILE" || log "WARN: claude -p exited with error for $bot"
+    2>> "$LOG_FILE"
+  local rc=$?
+
+  # First turn: if session-id conflict (session already exists from prior run),
+  # retry with --resume. This keeps cross-run continuity when BotManager restarts
+  # mid-game.
+  if [ $rc -ne 0 ] && ! bot_has_session "$bot"; then
+    if tail -20 "$LOG_FILE" | grep -qi "already in use"; then
+      log "Session $sid exists — retrying $bot with --resume"
+      run_with_timeout 120 "$CLAUDE_BIN" -p "$prompt" \
+        --resume "$sid" \
+        $model_flag \
+        --permission-mode bypassPermissions \
+        2>> "$LOG_FILE"
+      rc=$?
+    fi
+  fi
+
+  if [ $rc -eq 0 ]; then
+    bot_mark_session "$bot"
+  else
+    log "WARN: claude -p exited with error ($rc) for $bot"
+  fi
 }
 
 # ── Main loop ──
@@ -240,12 +280,11 @@ while game_alive; do
     if [ -n "$BOT" ]; then
       BOT_MODEL=$(get_bot_model "$BOT")
 
-      # Init if not yet initialized (fallback for failed pre-init)
-      if ! bot_is_initialized "$BOT"; then
-        init_bot "$BOT" "$BOT_MODEL" || continue
+      if bot_has_session "$BOT"; then
+        log "Bot turn: $BOT (model: ${BOT_MODEL:-default}) — resume + fresh framework"
+      else
+        log "Bot turn: $BOT (model: ${BOT_MODEL:-default}) — first turn, creating session"
       fi
-
-      log "Bot turn: $BOT (model: ${BOT_MODEL:-default}) — resuming session"
       invoke_bot_turn "$BOT" "$BOT_MODEL"
       debug "claude -p completed for $BOT"
     else

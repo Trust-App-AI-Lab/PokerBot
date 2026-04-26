@@ -1,34 +1,16 @@
-# BotManager — Handle Bot Turn (HTTP Mode)
+# Bot Turn
 
-It's your turn. Read state, decide, submit action, then EXIT.
+Your turn at the table. Your hole cards, the board, pot, stacks, and `legalActions` are in the `## State` block below. One action, then exit.
 
-## Your Task
+1. Use the tools and docs listed in your profile below. Read docs fresh from `.claude/skills/poker-strategy/strategy/<name>.md` when the spot touches them.
+2. Decide in character — tendencies in your profile drive the call, GTO informs it.
+3. Submit your decision — this REQUIRES invoking the **Bash tool**. Bash is always available, independent of any "Your Tools" list below (that list is for GTO tools only). Run this exact command via Bash (substitute your action + amount + optional chat):
+   `curl -s -X POST $SERVER_URL/action -H "Content-Type: application/json" -d '{"player":"'"$BOT_NAME"'","action":"call"}'`
+   Actions: `fold`, `check`, `call`, `raise`/`bet` (add `"amount": N`). Optional `"chat"` in character.
+   **Do NOT just write the curl command as text in your reply — that does nothing. You MUST call the Bash tool.** If the POST doesn't happen, you haven't acted.
+4. Exit after the Bash tool returns.
 
-1. **Read game state**: `curl -s "$SERVER_URL/state?player=$BOT_NAME"`
-   - Check `currentActor` — must match BOT_NAME
-   - If not your turn, say "not my turn" and EXIT immediately
+## Rules
 
-2. **Analyze** (if you have tool access from init):
-   - Run GTO tools to calculate equity, pot odds, hand strength
-   - Example: `py <SKILL_DIR>/tools/equity.py Js 8h "30%" Tc 3h 5s` (tool paths from `/poker-strategy`)
-   - Use your strategy knowledge from init to interpret results
-
-3. **Decide**: Stay in character (personality loaded during init). Choose an action.
-
-4. **Submit action**:
-   ```bash
-   curl -s -X POST $SERVER_URL/action \
-     -H "Content-Type: application/json" \
-     -d '{"player":"$BOT_NAME","action":"call"}'
-   ```
-   Valid actions: `fold`, `check`, `call`, `raise` (with `"amount": N`), `bet` (with `"amount": N`)
-   Optional: add `"chat": "message"` for table talk
-
-5. **EXIT immediately** — do not loop, do not read any files
-
-## Critical Rules
-
-- Do NOT read any files — use your memory from init
-- Do NOT use Read, Glob, or Grep tools
-- Do NOT loop — one turn, one action, EXIT
-- If currentActor doesn't match BOT_NAME → say "not my turn" and EXIT
+- Read only `.claude/skills/poker-strategy/strategy/*.md`. No Glob, no Grep.
+- One action per invocation. No loops. Never reveal hole cards.

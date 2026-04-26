@@ -211,6 +211,16 @@ engine.on('action_required', (data) => {
       sendTo(ws, 'your_turn', { ...data, turnDeadline });
     }
   }
+
+  // Global turn signal — unjoined observers (BotManager) rely on this to know
+  // whose turn it is without needing to fake-join as a player. Minimal payload,
+  // no hole cards, no info leak. Real players also receive it but already
+  // have the richer `your_turn` sent directly above.
+  broadcast('turn', {
+    player: data.player,
+    handNumber: currentHandNumber,
+    phase: engine.phase,
+  });
 });
 
 engine.on('player_acted', (data) => {
