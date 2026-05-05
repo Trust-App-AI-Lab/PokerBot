@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PokerBot — Multi-Agent Poker System</title>
   <meta name="google-site-verification" content="oYoccUIz_oqK3XJqBjV8-rzR-Nj3dfnQVM5T_XVfPbQ" />
-  <meta name="description" content="Multi-agent poker system — AI bots with distinct personalities play Texas Hold'em with real-time GTO coaching. Built on Claude Code." />
-  <meta name="keywords" content="poker, AI, GTO, coaching, Texas Hold'em, multi-agent, Claude Code, bot" />
+  <meta name="description" content="Multi-agent poker system — AI bots with distinct personalities play Texas Hold'em with real-time GTO coaching. Built on Codex with the StuClaw app layer." />
+  <meta name="keywords" content="poker, AI, GTO, coaching, Texas Hold'em, multi-agent, Codex, StuClaw, bot" />
   <meta name="author" content="EnyanDai" />
   <meta property="og:title" content="PokerBot — Multi-Agent Poker System" />
   <meta property="og:description" content="AI bots with distinct personalities play Texas Hold'em with real-time GTO coaching." />
@@ -584,9 +584,9 @@
 
 <!-- Hero -->
 <section class="hero">
-  <div class="hero-badge">Self-Hosted &middot; Multi-Agent &middot; Claude Code</div>
+  <div class="hero-badge">Self-Hosted &middot; Multi-Agent &middot; Codex + StuClaw</div>
   <h1><em>PokerBot</em></h1>
-  <p>AI bots with distinct personalities play Texas Hold'em against you. Self-hosted game server, GTO strategy engine, and live coaching &mdash; all powered by Claude.</p>
+  <p>AI bots with distinct personalities play Texas Hold'em against you. Self-hosted game server, GTO strategy engine, and live coaching &mdash; all powered by Codex with StuClaw app orchestration.</p>
   <div class="hero-stats">
     <div class="hero-stat">
       <div class="hero-stat-num">4</div>
@@ -615,23 +615,22 @@
 <section class="section" id="quickstart">
   <div class="container">
     <h2 class="section-title">Quick Start</h2>
-    <p class="section-hint">Prerequisites: Claude Code (CLI, desktop, or IDE) &middot; Node.js 18+ &middot; Python 3.10+</p>
+    <p class="section-hint">Prerequisites: StuClaw Desktop + Codex runtime &middot; Node.js 22 &middot; Python 3.11+</p>
     <div class="steps">
       <div class="step">
         <div class="step-num">1</div>
         <div class="step-body">
-          <div class="step-title">Clone &amp; install</div>
+          <div class="step-title">Install &amp; check</div>
           <div class="step-desc">
-            <code>git clone https://github.com/nicekid1/PokerBot.git</code><br>
-            <code>cd PokerBot/poker-server && npm install</code>
+            Install PokerBot from StuClaw Desktop, then run <code>Dependency check</code> from the app card.
           </div>
         </div>
       </div>
       <div class="step">
         <div class="step-num">2</div>
         <div class="step-body">
-          <div class="step-title">Open Claude Code in PokerBot/</div>
-          <div class="step-desc">The CLAUDE.md file auto-loads everything. Just start talking.</div>
+          <div class="step-title">Open Codex in PokerBot/</div>
+          <div class="step-desc">The AGENTS.md file auto-loads everything. Just start talking.</div>
         </div>
       </div>
       <div class="step">
@@ -688,9 +687,9 @@
         </div>
         <div class="card-desc">Six AI personalities from fish to pro, each with unique play styles, tells, and decision workflows. Create custom bots with natural language descriptions.</div>
         <div class="card-tags">
-          <span class="tag">Opus</span>
-          <span class="tag">Sonnet</span>
-          <span class="tag">Haiku</span>
+          <span class="tag">Codex</span>
+          <span class="tag">gpt-5.4</span>
+          <span class="tag">Personalities</span>
         </div>
       </div>
       <div class="card">
@@ -698,7 +697,7 @@
           <div class="card-icon" style="background:var(--green-dim);color:var(--green);">&#9827;</div>
           <span class="card-name">GTO Strategy Engine</span>
         </div>
-        <div class="card-desc">Five strategy documents and five Python calculation tools. Equity calculator, pot odds, preflop charts, hand evaluator, and range parser. Three-layer architecture: Thinking, Application, Tools.</div>
+        <div class="card-desc">Five strategy documents and four user-facing Python calculation tools. Equity calculator, pot odds, preflop charts, and hand evaluator, with range parsing support under the hood.</div>
         <div class="card-tags">
           <span class="tag">Python</span>
           <span class="tag">Equity</span>
@@ -710,7 +709,7 @@
           <div class="card-icon" style="background:rgba(217,119,6,0.08);color:var(--orange);">&#9829;</div>
           <span class="card-name">Live Coaching</span>
         </div>
-        <div class="card-desc">CoachBot runs in your main session &mdash; get real-time GTO advice, hand analysis, and strategy tips while you play. Always responsive, never blocked by bot decisions.</div>
+        <div class="card-desc">CoachBot runs through the relay in an app-private mapped Codex session. You get real-time GTO advice, hand analysis, and strategy tips while you play.</div>
         <div class="card-tags">
           <span class="tag">Real-time</span>
           <span class="tag">GTO Advice</span>
@@ -722,7 +721,7 @@
           <div class="card-icon" style="background:var(--tag-bg);color:var(--accent);">&#8644;</div>
           <span class="card-name">Dual-Session Architecture</span>
         </div>
-        <div class="card-desc">Main session for coaching + background BotManager for AI decisions. Each bot spawns as a fresh isolated session with parallel subagents. Zero information leakage.</div>
+        <div class="card-desc">Foreground app management + background BotManager decisions. Each bot uses its own mapped Codex session and only receives its own information-isolated table state.</div>
         <div class="card-tags">
           <span class="tag">Isolation</span>
           <span class="tag">Parallel</span>
@@ -734,7 +733,7 @@
           <div class="card-icon" style="background:rgba(124,58,237,0.08);color:var(--purple);">&#127760;</div>
           <span class="card-name">PokerNow Fallback</span>
         </div>
-        <div class="card-desc">Join existing pokernow.com rooms with full bot support. WebSocket bridge + file-based IPC orchestrator. Use when joining someone else's game.</div>
+        <div class="card-desc">Experimental adapter for pokernow.com rooms. WebSocket bridge + file-based IPC orchestrator, kept outside the default desktop path.</div>
         <div class="card-tags">
           <span class="tag">pokernow.com</span>
           <span class="tag">WebSocket</span>
@@ -749,7 +748,7 @@
 <section class="section" id="architecture">
   <div class="container">
     <h2 class="section-title">Architecture</h2>
-    <p class="section-hint">Four subsystems, two ports, three isolation layers.</p>
+    <p class="section-hint">Four subsystems, three ports, three isolation layers.</p>
 
     <div class="arch">
       <div class="arch-box">
@@ -785,7 +784,7 @@
           <span class="card-name">bot-management/</span>
           <span class="card-badge" style="background:var(--purple);">BOTS</span>
         </div>
-        <div class="card-desc">BotManager background loop polls for pending turns. Each batch spawns fresh <code>claude&nbsp;-p</code> sessions with parallel subagents. Personality + strategy per bot.</div>
+        <div class="card-desc">BotManager subscribes to server turn events, invokes <code>scripts/codex-agent.js</code>, parses each bot's JSON decision, and submits the action through the server API.</div>
       </div>
       <div class="card">
         <div class="card-top">
@@ -810,14 +809,14 @@
         <div class="isolation-num">L2</div>
         <div>
           <div class="isolation-title">Prompt Layer</div>
-          <div class="isolation-desc">Bot prompts contain zero file paths, no directory names, no other bot names. Strategy docs inlined, not read from disk.</div>
+          <div class="isolation-desc">Bot prompts contain only the bot's own table state. Tool and doc requests are served by BotManager from an allowlisted strategy set.</div>
         </div>
       </div>
       <div class="isolation-layer">
         <div class="isolation-num">L3</div>
         <div>
           <div class="isolation-title">Session Layer</div>
-          <div class="isolation-desc">CoachBot runs in main session. Bot decisions run in separate <code>claude -p</code> sessions. User's cards never enter any bot's prompt.</div>
+          <div class="isolation-desc">CoachBot and bot decisions run in separate app-private <code>scripts/codex-agent.js</code> sessions. User cards never enter another bot's prompt.</div>
         </div>
       </div>
     </div>
@@ -835,7 +834,7 @@
         <div class="bot-info">
           <div>
             <span class="bot-name">GTO Grace</span>
-            <span class="bot-model" style="background:var(--purple);color:#fff;">opus</span>
+            <span class="bot-model" style="background:var(--purple);color:#fff;">gpt-5.4</span>
           </div>
           <div class="bot-style">Balanced pro &mdash; plays GTO with full tool access, exploits deviations.</div>
           <div class="bot-traits">
@@ -850,7 +849,7 @@
         <div class="bot-info">
           <div>
             <span class="bot-name">Shark Alice</span>
-            <span class="bot-model" style="background:var(--accent);color:#fff;">sonnet</span>
+            <span class="bot-model" style="background:var(--accent);color:#fff;">gpt-5.4</span>
           </div>
           <div class="bot-style">Ice-cold shark &mdash; tight-aggressive, preys on weakness, minimal tells.</div>
           <div class="bot-traits">
@@ -865,7 +864,7 @@
         <div class="bot-info">
           <div>
             <span class="bot-name">ARIA Bot</span>
-            <span class="bot-model" style="background:var(--accent);color:#fff;">sonnet</span>
+            <span class="bot-model" style="background:var(--accent);color:#fff;">gpt-5.4</span>
           </div>
           <div class="bot-style">Steady regular &mdash; solid fundamentals, adapts to table dynamics.</div>
           <div class="bot-traits">
@@ -880,7 +879,7 @@
         <div class="bot-info">
           <div>
             <span class="bot-name">Maniac Charlie</span>
-            <span class="bot-model" style="background:var(--accent);color:#fff;">sonnet</span>
+            <span class="bot-model" style="background:var(--accent);color:#fff;">gpt-5.4</span>
           </div>
           <div class="bot-style">Reckless LAG &mdash; loves to bluff, puts max pressure, unpredictable.</div>
           <div class="bot-traits">
@@ -895,7 +894,7 @@
         <div class="bot-info">
           <div>
             <span class="bot-name">Fish Bob</span>
-            <span class="bot-model" style="background:var(--text-muted);color:#fff;">haiku</span>
+            <span class="bot-model" style="background:var(--text-muted);color:#fff;">gpt-5.4</span>
           </div>
           <div class="bot-style">Happy fish &mdash; calls too much, chases draws, having a great time.</div>
           <div class="bot-traits">
@@ -909,7 +908,7 @@
         <div class="bot-avatar" style="background:var(--bg);color:var(--text-muted);border:2px dashed var(--border);">+</div>
         <div class="bot-info">
           <div><span class="bot-name" style="color:var(--text-muted);">Your Custom Bot</span></div>
-          <div class="bot-style">Describe a personality in natural language and a new bot is created. "Create a TAG-style bot using opus model" &mdash; that's all it takes.</div>
+          <div class="bot-style">Describe a personality in natural language and a new bot is created. "Create a TAG-style bot using gpt-5.4 model" &mdash; that's all it takes.</div>
           <div class="bot-traits">
             <span class="tag">Natural Language</span>
             <span class="tag">Any Style</span>
@@ -925,7 +924,7 @@
   <div style="margin-bottom:0.4rem;">
     <strong style="color:var(--text-secondary);">PokerBot</strong> &nbsp;&middot;&nbsp; Multi-Agent Poker System
   </div>
-  4 subsystems &middot; 6 bots &middot; 5 strategy docs &middot; 5 GTO tools &middot; Self-hosted server &middot; Powered by Claude Code
+  4 subsystems &middot; 6 bots &middot; 5 strategy docs &middot; 5 GTO tools &middot; Self-hosted server &middot; Powered by Codex + StuClaw
 </div>
 
 </body>

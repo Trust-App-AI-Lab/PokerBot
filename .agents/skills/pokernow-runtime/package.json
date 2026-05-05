@@ -1,0 +1,15 @@
+{
+  "name": "pokernow-runtime",
+  "version": "1.0.0",
+  "description": "Self-contained Poker Now bot — JS bridge + Python brain, Codex as decision engine",
+  "private": true,
+  "scripts": {
+    "bridge": "node scripts/bridge-live.js",
+    "coach": "node scripts/coach-ws.js",
+    "orchestrator": "node scripts/orchestrator.js"
+  },
+  "dependencies": {
+    "node-fetch": "^2.7.0",
+    "ws": "^8.16.0"
+  }
+}

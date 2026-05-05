@@ -1,0 +1,86 @@
+{
+  "schema": "stuclaw.app.v0",
+  "id": "pokerbot",
+  "name": "PokerBot",
+  "version": "0.1.0",
+  "type": "web-agent-app",
+  "description": "A Codex-powered multi-agent Texas Hold'em table with bot personalities and a streaming coach.",
+  "desktop": {
+    "window": {
+      "width": 1180,
+      "height": 820,
+      "minWidth": 980,
+      "minHeight": 680
+    }
+  },
+  "actions": {
+    "start": {
+      "skill": "game",
+      "prompt": "Open the {appName} welcome session using the game skill. Do not start a local table, auto-join the default player, add AI bots, or deal a hand unless the user explicitly chooses a route from the welcome menu. Show the welcome options and available AI bots, then wait for the user's choice. Do not open a browser yourself; StuClaw Desktop will handle app window behavior after the run completes."
+    },
+    "check": {
+      "skill": "sch-deps",
+      "prompt": "Check and fix dependencies for {appName}."
+    },
+    "stop": {
+      "skill": "game",
+      "prompt": "Stop {appName}."
+    }
+  },
+  "codex": {
+    "instructions": "AGENTS.md",
+    "skillsDir": ".agents/skills",
+    "defaultModel": "gpt-5.4",
+    "requiresJsonl": true,
+    "requiresAgentMessageDelta": true
+  },
+  "environment": {
+    "mode": "existing",
+    "profile": "node22-python311plus",
+    "packages": [
+      "python>=3.11",
+      "nodejs=22",
+      "numpy",
+      "pip"
+    ],
+    "packageRoots": [
+      ".agents/skills/poker-server",
+      ".agents/skills/pokernow-runtime"
+    ],
+    "pythonModules": [
+      "numpy"
+    ],
+    "hostBinaries": [
+      "bash",
+      "curl",
+      "lsof"
+    ]
+  },
+  "runtime": {
+    "env": [
+      "NODE",
+      "PY",
+      "CODEX_BIN"
+    ],
+    "binaries": {
+      "node": "NODE",
+      "python": "PY",
+      "codex": "CODEX_BIN"
+    },
+    "ports": [
+      3456,
+      3457,
+      3460
+    ],
+    "logs": [
+      "game-data/botmanager.log",
+      "game-data/relay.log",
+      "game-data/narrator.log"
+    ]
+  },
+  "hub": {
+    "platform": "StudyClawHub",
+    "slug": "pokerbot",
+    "category": "Games"
+  }
+}

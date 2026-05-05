@@ -2,44 +2,32 @@
 __pycache__/
 *.pyc
 
-# Claude Code local config (ignore .claude/ except skills/)
-.claude/*
-!.claude/skills/
-.claude/skills/sch-*
-
 # VS Code
 .vscode/
 
 # OS
 .DS_Store
 
-# ────────────────────────────────────────────────────
-# PokerBot runtime artifacts (under .claude/skills/)
-# ────────────────────────────────────────────────────
-
-# Poker server runtime
-.claude/skills/poker-server/history.jsonl
-.claude/skills/poker-server/node_modules/
-.claude/skills/poker-server/package-lock.json
-.claude/skills/poker-server/.relay.pid
-.claude/skills/poker-server/.narrator.pid
-.claude/skills/poker-server/.server.pid
-
-# Pokernow runtime
-.claude/skills/pokernow-runtime/node_modules/
-.claude/skills/pokernow-runtime/package-lock.json
-.claude/skills/pokernow-runtime/orchestrator.pid
-.claude/skills/pokernow-runtime/game.json
-
-# Per-machine binary paths (CLAUDE_BIN, PY, NODE)
+# Per-machine binary paths (CODEX_BIN, PY, NODE)
 paths.env
 
-# Bot-management runtime
-.claude/skills/bot-management/.botmanager.log
-.claude/skills/bot-management/.botmanager.pid
+# Runtime artifacts after Codex skill migration.
+.agents/skills/poker-server/history.jsonl
+.agents/skills/poker-server/node_modules/
+.agents/skills/poker-server/package-lock.json
+.agents/skills/poker-server/.relay.pid
+.agents/skills/poker-server/.narrator.pid
+.agents/skills/poker-server/.server.pid
+.agents/skills/pokernow-runtime/node_modules/
+.agents/skills/pokernow-runtime/package-lock.json
+.agents/skills/pokernow-runtime/orchestrator.pid
+.agents/skills/pokernow-runtime/game.json
+.agents/skills/bot-management/.botmanager.log
+.agents/skills/bot-management/.botmanager.pid
 
 # Per-player game state (per-session runtime dirs: Coach/, CoachBot/, etc.)
 game-data/
+.stuclaw/
 
 # ────────────────────────────────────────────────────
 # Project-root runtime
