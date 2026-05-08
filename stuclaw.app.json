@@ -16,6 +16,7 @@
   "actions": {
     "start": {
       "skill": "game",
+      "openAppOnFinish": false,
       "prompt": "Open the {appName} welcome session using the game skill. Do not start a local table, auto-join the default player, add AI bots, or deal a hand unless the user explicitly chooses a route from the welcome menu. Show the welcome options and available AI bots, then wait for the user's choice. Do not open a browser yourself; StuClaw Desktop will handle app window behavior after the run completes."
     },
     "check": {
