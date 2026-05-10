@@ -42,12 +42,12 @@ Scan `bots/*/personality.md` (this directory) to discover available bots.
 
 ## Architecture
 
-**Separate sessions**: foreground Codex session = user/app management. CoachBot and play bots use app-private mapped Codex sessions through `scripts/codex-agent.js`. BotManager is a background daemon that wakes on server events, invokes a known bot when it is `currentActor`, parses the bot's JSON decision, and submits the action itself. Never run bot decisions in the foreground session.
+**Separate sessions**: foreground Codex session = user/app management. CoachBot and play bots use app-private mapped Codex sessions through StuClaw Desktop's `scripts/codex-agent.cjs`. BotManager is a background daemon that wakes on server events, invokes a known bot when it is `currentActor`, parses the bot's JSON decision, and submits the action itself. Never run bot decisions in the foreground session.
 
-**Event-driven (HTTP mode, default)**: `botmanager.js` opens one WebSocket to `ws://localhost:3457` as an unjoined observer. The server broadcasts a global `'turn'` event (player name, handNumber, phase — no hole cards) inside the `action_required` handler. On each `turn` event, BotManager:
+**Event-driven (HTTP mode, default)**: `botmanager.js` opens one WebSocket to `ws://localhost:3457` as an unjoined observer. The server broadcasts a global `'turn'` event (player name, turnId, handNumber, phase — no hole cards) inside the `action_required` handler. On each `turn` event, BotManager:
 1. Checks `player` against `bots/<name>/personality.md` (and excludes `CoachBot`, and honors `--bots A,B` allow-list if given).
 2. `GET /state?player=<name>` — fetches the bot's info-isolated view with hole cards.
-3. Spawns `scripts/codex-agent.js` with the turn prompt.
+3. Spawns StuClaw Desktop's `scripts/codex-agent.cjs` with the turn prompt.
 4. Parses the bot's final JSON decision and submits `POST /action` on the bot's behalf.
 
 No polling, no 2-second wake-up tax. Symmetric with the narrator daemon (which does the equivalent for CoachBot on the relay side).
@@ -69,7 +69,7 @@ SERVER_URL=..., BOT_NAME=...
 <JSON from /state?player=$bot>
 ```
 
-- First turn: `node scripts/codex-agent.js --session-key pokerbot-<BotName> --model <m> "<prompt>"`
+- First turn: `node <stuclaw-desktop>/scripts/codex-agent.cjs --session-key pokerbot-<BotName> --model <m> "<prompt>"`
 - Subsequent turns: same, plus `--resume` — in-game observations (past hands, opponent reads) carry forward via the mapped Codex thread; turn.md + personality are re-fed every turn to defeat compaction drift.
 
 **Logical session key**: `pokerbot-$BOT_NAME` (epoch 0). The adapter stores the actual Codex thread id in `.stuclaw/sessions.json`. After each periodic clear the logical key becomes `pokerbot-$BOT_NAME-v$epoch`.
@@ -86,7 +86,7 @@ This caps transcript growth + keeps the static prefix cache-warm within each epo
 - Frontmatter: only `model` (`gpt-5.4` or another Codex model).
 - Body: character blurb + `## Your Tools` + `## Your Docs` tables tailored to this bot. Fish/Maniacs use "None — <reason>" in place of the tables. The bot sees ONLY what its personality lists — no generic menu, no allow-list filtering in the script.
 
-**Information isolation**: server `/state?player=X` only returns X's hole cards. Bot sessions are read-only (`scripts/codex-agent.js` launches Codex with a read-only sandbox), so bots can run listed local analysis tools and read listed strategy docs without mutating the project. Bots must not write files, install packages, use the network, call HTTP endpoints, submit actions directly, or inspect unrelated files.
+**Information isolation**: server `/state?player=X` only returns X's hole cards. Bot sessions are read-only (`scripts/codex-agent.cjs` launches Codex with a read-only sandbox), so bots can run listed local analysis tools and read listed strategy docs without mutating the project. Bots must not write files, install packages, use the network, call HTTP endpoints, submit actions directly, or inspect unrelated files.
 
 ## Start / Stop
 

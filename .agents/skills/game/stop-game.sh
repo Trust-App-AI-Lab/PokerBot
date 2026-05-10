@@ -11,10 +11,23 @@ log() { echo "[StopGame] $*"; }
 # Source pinned binary paths if present (PY / NODE / CODEX_BIN)
 [ -f "$PROJECT_ROOT/paths.env" ] && source "$PROJECT_ROOT/paths.env"
 NODE="${NODE:-node}"
-CODEX_AGENT="$PROJECT_ROOT/scripts/codex-agent.js"
+resolve_codex_agent() {
+  local candidates=(
+    "${STUCLAW_CODEX_AGENT:-}"
+    "${STUCLAW_DESKTOP_ROOT:+$STUCLAW_DESKTOP_ROOT/scripts/codex-agent.cjs}"
+    "$PROJECT_ROOT/../stuclaw-desktop/scripts/codex-agent.cjs"
+    "$PROJECT_ROOT/../../scripts/codex-agent.cjs"
+  )
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    [ -n "$candidate" ] && [ -f "$candidate" ] && { echo "$candidate"; return; }
+  done
+}
+CODEX_AGENT="$(resolve_codex_agent)"
 wipe_session() {
   local session_key="$1"
-  "$NODE" "$CODEX_AGENT" --reset --session-key "$session_key" >/dev/null 2>&1 || true
+  [ -n "$CODEX_AGENT" ] || return 0
+  "$NODE" "$CODEX_AGENT" --app-dir "$PROJECT_ROOT" --reset --session-key "$session_key" >/dev/null 2>&1 || true
 }
 
 # 1. Stop BotManager (delegates to /bot-management)
@@ -42,19 +55,19 @@ if [ -f "$PROJECT_ROOT/game-data/.current-user" ]; then
   if [ -n "$NAME" ]; then
     wipe_session "coachbot-$NAME"
     wiped=$((wiped + 1))
-    # Also wipe this user's profile: chat/hand history jsonls + live state.
-    # UI doesn't read these directly for display (chat is in browser
-    # localStorage — see gameId auto-clear in poker-table.html), but they're
-    # residue from the prior game and shouldn't leak into the next one's
-    # history review features.
+    # Also wipe this user's profile: CoachBot chat, hand history, and live
+    # state. The browser hydrates from coach-chat.jsonl and keeps a bounded
+    # localStorage cache, so both server data and the next game id must reset.
     PROFILE="$PROJECT_ROOT/game-data/$NAME"
     if [ -d "$PROFILE" ]; then
       rm -f "$PROFILE/history/"*.jsonl 2>/dev/null
+      rm -f "$PROFILE/coach-chat.jsonl" 2>/dev/null
       rm -f "$PROFILE/state.json" 2>/dev/null
-      log "Wiped profile $NAME (history + state.json)."
+      log "Wiped profile $NAME (coach chat + history + state.json)."
     fi
   fi
 fi
+rm -f "$PROJECT_ROOT/game-data/.current-game-id" 2>/dev/null
 log "Wiped $wiped Codex logical session(s)."
 
 log "All stopped."

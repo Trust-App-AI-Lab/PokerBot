@@ -784,7 +784,7 @@
           <span class="card-name">bot-management/</span>
           <span class="card-badge" style="background:var(--purple);">BOTS</span>
         </div>
-        <div class="card-desc">BotManager subscribes to server turn events, invokes <code>scripts/codex-agent.js</code>, parses each bot's JSON decision, and submits the action through the server API.</div>
+        <div class="card-desc">BotManager subscribes to server turn events, invokes the shared Desktop Codex runner, parses each bot's JSON decision, and submits the action through the server API.</div>
       </div>
       <div class="card">
         <div class="card-top">
@@ -816,7 +816,7 @@
         <div class="isolation-num">L3</div>
         <div>
           <div class="isolation-title">Session Layer</div>
-          <div class="isolation-desc">CoachBot and bot decisions run in separate app-private <code>scripts/codex-agent.js</code> sessions. User cards never enter another bot's prompt.</div>
+          <div class="isolation-desc">CoachBot and bot decisions run in separate app-private Desktop Codex runner sessions. User cards never enter another bot's prompt.</div>
         </div>
       </div>
     </div>

@@ -30,7 +30,19 @@ log() { echo "[Game] $*"; }
 # Source pinned binary paths if present (PY / NODE / CODEX_BIN)
 [ -f "$PROJECT_ROOT/paths.env" ] && source "$PROJECT_ROOT/paths.env"
 NODE="${NODE:-node}"
-CODEX_AGENT="$PROJECT_ROOT/scripts/codex-agent.js"
+resolve_codex_agent() {
+  local candidates=(
+    "${STUCLAW_CODEX_AGENT:-}"
+    "${STUCLAW_DESKTOP_ROOT:+$STUCLAW_DESKTOP_ROOT/scripts/codex-agent.cjs}"
+    "$PROJECT_ROOT/../stuclaw-desktop/scripts/codex-agent.cjs"
+    "$PROJECT_ROOT/../../scripts/codex-agent.cjs"
+  )
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    [ -n "$candidate" ] && [ -f "$candidate" ] && { echo "$candidate"; return; }
+  done
+}
+CODEX_AGENT="$(resolve_codex_agent)"
 
 # ── Subcommand dispatch ──
 CMD="start"
@@ -118,7 +130,8 @@ fi
 # ── Helpers: logical Codex session wipe (fresh thread per game) ──
 wipe_session() {
   local session_key="$1"
-  "$NODE" "$CODEX_AGENT" --reset --session-key "$session_key" >/dev/null 2>&1 || true
+  [ -n "$CODEX_AGENT" ] || return 0
+  "$NODE" "$CODEX_AGENT" --app-dir "$PROJECT_ROOT" --reset --session-key "$session_key" >/dev/null 2>&1 || true
 }
 
 # ── 0. Full cleanup ──
@@ -130,6 +143,7 @@ sleep 1
 # Relay reads game-data/.current-user when it launches, so write it first.
 mkdir -p "$PROJECT_ROOT/game-data"
 echo -n "$NAME" > "$PROJECT_ROOT/game-data/.current-user"
+echo -n "pokerbot-$(date -u +%Y%m%dT%H%M%SZ)-$$" > "$PROJECT_ROOT/game-data/.current-game-id"
 
 PUBLIC_FLAG=""
 [ -n "$PUBLIC" ] && PUBLIC_FLAG="--public"
@@ -165,8 +179,8 @@ wipe_session "$COACH_SESSION_KEY"
 
 # ── 4. CoachBot pre-warm (independent session, resumed per analysis) ──
 if $START_COACH; then
-  if [ ! -x "$CODEX_AGENT" ]; then
-    log "ERROR: Codex adapter missing at $CODEX_AGENT"
+  if [ ! -f "$CODEX_AGENT" ]; then
+    log "ERROR: StuClaw Desktop codex-agent runner missing. Set STUCLAW_CODEX_AGENT to stuclaw-desktop/scripts/codex-agent.cjs"
     exit 1
   fi
   # Single source of truth for CoachBot's model: `model:` in coachbot/SKILL.md
@@ -178,6 +192,7 @@ if $START_COACH; then
   log "CoachBot pre-warming (session: $COACH_SESSION_KEY, model: $COACH_MODEL)..."
   COACH_INIT_PROMPT="Read .agents/skills/coachbot/SKILL.md and follow it throughout this session. Also read .agents/skills/poker-strategy/SKILL.md (the tiny router — tool + doc index). Do NOT bulk-load the strategy docs; per-turn you will Read individual docs on-demand when the spot touches them. When done, reply exactly: load successfully"
   COACH_OUT=$("$NODE" "$CODEX_AGENT" \
+    --app-dir "$PROJECT_ROOT" \
     --session-key "$COACH_SESSION_KEY" \
     --model "$COACH_MODEL" \
     "$COACH_INIT_PROMPT" 2>&1) || true

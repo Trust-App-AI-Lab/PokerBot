@@ -221,6 +221,9 @@ class PokerEngine extends EventEmitter {
     this.actions = [];            // [{ actor, action, amount, phase }]
     this.handNumber = 0;
     this._paused = false;
+    this._stateVersion = 0;        // monotonically increases when table state changes
+    this._turnSeq = 0;             // monotonically increases for each required decision
+    this._currentTurnId = '';
 
     // Betting round state
     this._currentPlayerIdx = -1;  // index into _activePlayers
@@ -228,6 +231,10 @@ class PokerEngine extends EventEmitter {
     this._currentBet = 0;         // current bet to match
     this._minRaise = 0;           // minimum raise increment
     this._roundActed = new Set(); // who has acted this round
+  }
+
+  _markStateChanged() {
+    this._stateVersion += 1;
   }
 
   // ── Player management ─────────────────────────
@@ -248,6 +255,7 @@ class PokerEngine extends EventEmitter {
     const player = new Player(name, stack, seat);
     this.players.set(name, player);
     this._updateSeatOrder();
+    this._markStateChanged();
 
     this.emit('player_joined', { name, stack, seat });
 
@@ -270,6 +278,7 @@ class PokerEngine extends EventEmitter {
 
     this.players.delete(name);
     this._updateSeatOrder();
+    this._markStateChanged();
     this.emit('player_left', { name });
 
     // Check if hand should end
@@ -290,6 +299,7 @@ class PokerEngine extends EventEmitter {
 
     player.stack += amount;
     player.sittingOut = false;
+    this._markStateChanged();
     this.emit('player_rebuy', { name, amount, newStack: player.stack });
 
     // Auto-start if enough players and waiting
@@ -307,6 +317,7 @@ class PokerEngine extends EventEmitter {
     if (!player) return { ok: false, error: 'Player not found' };
     if (player.sittingOut) return { ok: false, error: 'Already sitting out' };
     player.sittingOut = true;
+    this._markStateChanged();
     // If mid-hand, fold them
     if (this.phase !== 'waiting' && !player.folded) {
       player.folded = true;
@@ -322,6 +333,7 @@ class PokerEngine extends EventEmitter {
     if (!player.sittingOut) return { ok: false, error: 'Not sitting out' };
     if (player.stack <= 0) return { ok: false, error: 'Need to rebuy first (stack is 0)' };
     player.sittingOut = false;
+    this._markStateChanged();
     this.emit('player_sit_back', { name, seat: player.seat });
     // Auto-start if enough players
     if (this.phase === 'waiting' && this.autoStart && this._readyPlayers().length >= 2) {
@@ -341,6 +353,7 @@ class PokerEngine extends EventEmitter {
     }
     this.players.delete(name);
     this._updateSeatOrder();
+    this._markStateChanged();
     this.emit('player_kicked', { name });
     if (this.phase !== 'waiting') this._checkHandEnd();
     return { ok: true };
@@ -351,6 +364,7 @@ class PokerEngine extends EventEmitter {
   pause() {
     if (this._paused) return { ok: false, error: 'Already paused' };
     this._paused = true;
+    this._markStateChanged();
     this.emit('game_paused', {});
     return { ok: true };
   }
@@ -358,6 +372,7 @@ class PokerEngine extends EventEmitter {
   resume() {
     if (!this._paused) return { ok: false, error: 'Not paused' };
     this._paused = false;
+    this._markStateChanged();
     this.emit('game_resumed', {});
     // If waiting and enough players, auto-start
     if (this.phase === 'waiting' && this.autoStart && this._readyPlayers().length >= 2) {
@@ -376,6 +391,7 @@ class PokerEngine extends EventEmitter {
     this.smallBlind = newSB;
     this.bigBlind = newBB;
     if (opts.autoStart !== undefined) this.autoStart = !!opts.autoStart;
+    this._markStateChanged();
     this.emit('settings_changed', { smallBlind: this.smallBlind, bigBlind: this.bigBlind, autoStart: this.autoStart });
     return { ok: true, smallBlind: this.smallBlind, bigBlind: this.bigBlind, autoStart: this.autoStart };
   }
@@ -441,6 +457,9 @@ class PokerEngine extends EventEmitter {
     this.sidePots = [];
     this.actions = [];
     this.phase = 'preflop';
+    this._currentTurnId = '';
+    this._turnSeq = 0;
+    this._markStateChanged();
 
     // Post blinds
     this._postBlinds(ready);
@@ -545,6 +564,7 @@ class PokerEngine extends EventEmitter {
     if (p.stack === 0) p.allIn = true;
 
     this.actions.push({ actor: name, action: type, amount: actual, phase: this.phase });
+    this._markStateChanged();
     this.emit('blind_posted', { player: name, type, amount: actual });
   }
 
@@ -616,19 +636,63 @@ class PokerEngine extends EventEmitter {
       return;
     }
 
-    const callAmount = Math.max(0, Math.min(this._currentBet - player.bet, player.stack));
-    const minRaise = Math.min(this._currentBet + this._minRaise, player.stack + player.bet);
-    const maxRaise = player.stack + player.bet; // all-in
+    const betting = this._bettingInfoFor(name);
+    this._turnSeq += 1;
+    this._currentTurnId = `${this.handNumber}:${this.phase}:${this._turnSeq}:${name}`;
+    this._markStateChanged();
 
     this.emit('action_required', {
       player: name,
-      callAmount,
-      minRaise,
-      maxRaise: Math.max(maxRaise, minRaise),
+      turnId: this._currentTurnId,
+      callAmount: betting.callAmount,
+      minRaise: betting.minRaise,
+      maxRaise: betting.maxRaise,
+      legalActions: betting.legalActions,
       pot: this.pot,
       phase: this.phase,
       currentBet: this._currentBet,
     });
+  }
+
+  _bettingInfoFor(playerName) {
+    const p = this.players.get(playerName);
+    const bettingActive = !['waiting', 'showdown'].includes(this.phase);
+    const isMyTurn = !!(
+      bettingActive &&
+      p &&
+      !p.folded &&
+      !p.allIn &&
+      !p.sittingOut &&
+      this.seatOrder[this._currentPlayerIdx] === playerName
+    );
+    if (!isMyTurn) {
+      return { isMyTurn: false, callAmount: 0, minRaise: 0, maxRaise: 0, legalActions: [] };
+    }
+
+    const callAmount = Math.max(0, Math.min(this._currentBet - p.bet, p.stack));
+    const maxTotal = p.stack + p.bet;
+    const minTotal = Math.min(this._currentBet + this._minRaise, maxTotal);
+    const legalActions = [{ action: 'fold' }];
+
+    if (callAmount === 0) legalActions.push({ action: 'check' });
+    else legalActions.push({ action: 'call', amount: callAmount });
+
+    if (p.stack > 0 && maxTotal > this._currentBet) {
+      legalActions.push({
+        action: callAmount === 0 ? 'bet' : 'raise',
+        minAmount: minTotal,
+        maxAmount: maxTotal,
+        amountType: 'total',
+      });
+    }
+
+    return {
+      isMyTurn: true,
+      callAmount,
+      minRaise: minTotal,
+      maxRaise: maxTotal,
+      legalActions,
+    };
   }
 
   // ── Act ───────────────────────────────────────
@@ -649,6 +713,7 @@ class PokerEngine extends EventEmitter {
       case 'fold':
         player.folded = true;
         this.actions.push({ actor: playerName, action: 'fold', phase: this.phase });
+        this._markStateChanged();
         this.emit('player_acted', { player: playerName, action: 'fold' });
         break;
 
@@ -657,6 +722,7 @@ class PokerEngine extends EventEmitter {
         // Safety: treat as check even if bet tracking is slightly off
         if (player.bet > this._currentBet) this._currentBet = player.bet;
         this.actions.push({ actor: playerName, action: 'check', phase: this.phase });
+        this._markStateChanged();
         this.emit('player_acted', { player: playerName, action: 'check' });
         break;
 
@@ -669,6 +735,7 @@ class PokerEngine extends EventEmitter {
         this.pot += callAmt;
         if (player.stack === 0) player.allIn = true;
         this.actions.push({ actor: playerName, action: 'call', amount: callAmt, phase: this.phase });
+        this._markStateChanged();
         this.emit('player_acted', { player: playerName, action: 'call', amount: callAmt });
         break;
 
@@ -710,6 +777,7 @@ class PokerEngine extends EventEmitter {
 
         const actLabel = callAmount === 0 ? 'bet' : 'raise';
         this.actions.push({ actor: playerName, action: actLabel, amount: actualTotal, phase: this.phase });
+        this._markStateChanged();
         this.emit('player_acted', { player: playerName, action: actLabel, amount: actualTotal });
         break;
       }
@@ -788,6 +856,7 @@ class PokerEngine extends EventEmitter {
     this._currentBet = 0;
     this._lastRaiserIdx = -1;
     this._roundActed = new Set();
+    this._currentTurnId = '';
 
     const phaseIdx = PHASES.indexOf(this.phase);
 
@@ -796,22 +865,26 @@ class PokerEngine extends EventEmitter {
         this.phase = 'flop';
         this.deck.pop(); // burn
         this.communityCards.push(this.deck.pop(), this.deck.pop(), this.deck.pop());
+        this._markStateChanged();
         this.emit('board_dealt', { phase: 'flop', cards: [...this.communityCards] });
         break;
       case 'flop':
         this.phase = 'turn';
         this.deck.pop(); // burn
         this.communityCards.push(this.deck.pop());
+        this._markStateChanged();
         this.emit('board_dealt', { phase: 'turn', cards: [...this.communityCards] });
         break;
       case 'turn':
         this.phase = 'river';
         this.deck.pop(); // burn
         this.communityCards.push(this.deck.pop());
+        this._markStateChanged();
         this.emit('board_dealt', { phase: 'river', cards: [...this.communityCards] });
         break;
       case 'river':
         this.phase = 'showdown';
+        this._markStateChanged();
         this._awardPot();
         return;
     }
@@ -824,6 +897,7 @@ class PokerEngine extends EventEmitter {
 
   _awardPot() {
     this.phase = 'showdown';
+    this._currentTurnId = '';
     const active = this._activePlayers();
 
     if (active.length === 1) {
@@ -831,6 +905,7 @@ class PokerEngine extends EventEmitter {
       const winner = this.players.get(active[0]);
       winner.stack += this.pot;
       const results = [{ winner: active[0], amount: this.pot, hand: null }];
+      this._markStateChanged();
       this.emit('hand_end', {
         results,
         pot: this.pot,
@@ -866,8 +941,8 @@ class PokerEngine extends EventEmitter {
       const remainder = pot.amount - share * winners.length;
 
       winners.forEach((w, i) => {
-        const winAmount = share + (i === 0 ? remainder : 0);
-        this.players.get(w.name).stack += winAmount;
+      const winAmount = share + (i === 0 ? remainder : 0);
+      this.players.get(w.name).stack += winAmount;
         results.push({
           winner: w.name,
           amount: winAmount,
@@ -877,6 +952,7 @@ class PokerEngine extends EventEmitter {
       });
     }
 
+    this._markStateChanged();
     this.emit('hand_end', {
       results,
       pot: this.pot,
@@ -940,6 +1016,8 @@ class PokerEngine extends EventEmitter {
 
   _scheduleNextHand() {
     this.phase = 'waiting';
+    this._currentTurnId = '';
+    this._markStateChanged();
 
     // Remove busted players
     for (const [name, p] of this.players) {
@@ -1065,6 +1143,8 @@ class PokerEngine extends EventEmitter {
       players,
       actions: [...this.actions],
       currentActor,
+      turnId: currentActor ? this._currentTurnId || null : null,
+      stateVersion: this._stateVersion,
       dealerSeat: this.dealerSeat,
       positions: this.getPositions(),
       smallBlind: this.smallBlind,
@@ -1083,15 +1163,14 @@ class PokerEngine extends EventEmitter {
 
     state.myCards = p ? [...p.cards] : [];
     state.myStack = p ? p.stack : 0;
-    state.isMyTurn = !['waiting', 'showdown'].includes(this.phase)
-      && this.seatOrder[this._currentPlayerIdx] === playerName;
+    const betting = this._bettingInfoFor(playerName);
+    state.isMyTurn = betting.isMyTurn;
+    state.legalActions = betting.legalActions;
 
     if (state.isMyTurn) {
-      const callAmount = Math.min(this._currentBet - (p?.bet || 0), p?.stack || 0);
-      state.callAmount = Math.max(0, callAmount);
-      const maxTotal = (p?.stack || 0) + (p?.bet || 0);
-      state.minRaise = Math.min(this._currentBet + this._minRaise, maxTotal);
-      state.maxRaise = maxTotal;
+      state.callAmount = betting.callAmount;
+      state.minRaise = betting.minRaise;
+      state.maxRaise = betting.maxRaise;
     }
 
     return state;

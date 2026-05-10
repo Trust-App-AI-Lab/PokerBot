@@ -88,6 +88,7 @@ const engine = new PokerEngine({
 // Each WS connection → { ws, playerName }
 
 const clients = new Map(); // ws → { playerName }
+let pendingSettledStateBroadcast = null;
 
 function broadcast(type, data, exceptWs) {
   const msg = JSON.stringify({ type, ...data });
@@ -105,6 +106,10 @@ function sendTo(ws, type, data) {
 }
 
 function sendStateToAll() {
+  if (pendingSettledStateBroadcast) {
+    clearImmediate(pendingSettledStateBroadcast);
+    pendingSettledStateBroadcast = null;
+  }
   for (const [ws, client] of clients) {
     if (client.playerName && ws.readyState === WebSocket.OPEN) {
       const state = engine.getPlayerState(client.playerName);
@@ -114,6 +119,14 @@ function sendStateToAll() {
   }
   // Also write state.json for CC
   writeCoachState();
+}
+
+function scheduleSettledStateToAll() {
+  if (pendingSettledStateBroadcast) return;
+  pendingSettledStateBroadcast = setImmediate(() => {
+    pendingSettledStateBroadcast = null;
+    sendStateToAll();
+  });
 }
 
 function writeCoachState() {
@@ -158,7 +171,7 @@ engine.on('hand_start', (data) => {
     positions: data.positions,
     players,
   }));
-  sendStateToAll();
+  scheduleSettledStateToAll();
 });
 
 engine.on('cards_dealt', (data) => {
@@ -168,12 +181,12 @@ engine.on('cards_dealt', (data) => {
       sendTo(ws, 'cards', { cards: data.cards });
     }
   }
-  sendStateToAll();
+  scheduleSettledStateToAll();
 });
 
 engine.on('blind_posted', (data) => {
   log.info(`  ${data.type}: ${data.player} $${data.amount}`);
-  sendStateToAll();
+  scheduleSettledStateToAll();
 });
 
 // ── Turn timer ──
@@ -209,6 +222,8 @@ function startTurnTimer(playerName) {
 engine.on('action_required', (data) => {
   log.info(`  ★ Waiting: ${data.player} (call $${data.callAmount}, pot $${data.pot})`);
   startTurnTimer(data.player);
+  // This is the first point where the turn pointer is settled for the next
+  // decision. Sending state here cancels any deferred post-action snapshot.
   sendStateToAll();
 
   // Notify the specific player
@@ -224,6 +239,7 @@ engine.on('action_required', (data) => {
   // have the richer `your_turn` sent directly above.
   broadcast('turn', {
     player: data.player,
+    turnId: data.turnId || null,
     handNumber: currentHandNumber,
     phase: engine.phase,
   });
@@ -233,7 +249,9 @@ engine.on('player_acted', (data) => {
   clearTurnTimer();
   log.info(`  ${data.player}: ${data.action}${data.amount ? ' $' + data.amount : ''}`);
   logEvent(playerActionEvent(currentHandNumber, data, engine.phase));
-  sendStateToAll();
+  // `player_acted` fires before engine.act() advances the turn pointer. Log
+  // the action now, but defer full state until the current sync flow settles.
+  scheduleSettledStateToAll();
 });
 
 engine.on('board_dealt', (data) => {
@@ -244,7 +262,9 @@ engine.on('board_dealt', (data) => {
     cards: data.cards,
     board: [...engine.communityCards],
   }));
-  sendStateToAll();
+  // A betting round starts immediately after the board event. Defer state so
+  // `currentActor` reflects the first actor on the new street.
+  scheduleSettledStateToAll();
 });
 
 engine.on('hand_end', (data) => {
@@ -623,6 +643,7 @@ const server = http.createServer((req, res) => {
         const oldSeat = player.seat;
         player.seat = seat;
         engine._updateSeatOrder();
+        if (typeof engine._markStateChanged === 'function') engine._markStateChanged();
         log.info(`💺 ${name} moved from seat ${oldSeat} to seat ${seat}`);
         broadcast('player_moved', { name, oldSeat, newSeat: seat });
         sendStateToAll();

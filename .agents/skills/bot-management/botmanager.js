@@ -8,7 +8,7 @@
  * .agents/skills/bot-management/bots/<name>/personality.md. If so, we:
  *   1. GET /state?player=<name>   — the bot's info-isolated view (hole cards)
  *   2. Build turn prompt          = botmanager-turn.md + personality body + env + state JSON
- *   3. Spawn `scripts/codex-agent.js` with a stable logical session key
+ *   3. Spawn StuClaw Desktop's `scripts/codex-agent.cjs` with a stable logical session key
  *   4. Parse the bot's JSON decision and submit it to `/action`
  *
  * Replaces the 2-second polling loop in botmanager.sh. Zero wasted curls
@@ -27,7 +27,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const { URL } = require('url');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 // `ws` is installed under poker-server/node_modules by start-server.sh. We
 // don't duplicate the install for bot-management — resolve it from there.
@@ -41,7 +41,6 @@ const BOTS_DIR = path.join(__dirname, 'bots');
 const PROMPT_TURN = path.join(__dirname, 'botmanager-turn.md');
 const PID_FILE = path.join(__dirname, '.botmanager.pid');
 const LOG_FILE = path.join(__dirname, '.botmanager.log');
-const CODEX_AGENT = path.join(PROJECT_ROOT, 'scripts', 'codex-agent.js');
 
 // Optional binary pins (paths.env)
 const PATHS_ENV = path.join(PROJECT_ROOT, 'paths.env');
@@ -51,6 +50,41 @@ if (fs.existsSync(PATHS_ENV)) {
     const m = line.match(/^\s*([A-Z_]+)=(.*?)\s*$/);
     if (m) envPins[m[1]] = m[2].replace(/^["']|["']$/g, '');
   }
+}
+
+function resolveDesktopCodexAgent() {
+  const candidates = [
+    process.env.STUCLAW_CODEX_AGENT,
+    envPins.STUCLAW_CODEX_AGENT,
+    process.env.STUCLAW_DESKTOP_ROOT && path.join(process.env.STUCLAW_DESKTOP_ROOT, 'scripts', 'codex-agent.cjs'),
+    path.resolve(PROJECT_ROOT, '..', 'stuclaw-desktop', 'scripts', 'codex-agent.cjs'),
+    path.resolve(PROJECT_ROOT, '..', '..', 'scripts', 'codex-agent.cjs'),
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return '';
+}
+
+const CODEX_AGENT = resolveDesktopCodexAgent();
+
+function codexAgentArgs(args) {
+  if (!CODEX_AGENT) {
+    throw new Error('StuClaw Desktop codex-agent runner not found. Set STUCLAW_CODEX_AGENT to stuclaw-desktop/scripts/codex-agent.cjs.');
+  }
+  return [CODEX_AGENT, '--app-dir', PROJECT_ROOT, ...args];
+}
+
+function isOwnBotManagerProcess(pid) {
+  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return false;
+  try { process.kill(pid, 0); } catch { return false; }
+  const result = spawnSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' });
+  if (result.status !== 0) return false;
+  const command = (result.stdout || '').trim();
+  if (!command) return false;
+  const jsPath = path.join(__dirname, 'botmanager.js');
+  const shellPath = path.join(__dirname, 'botmanager.sh');
+  return command.includes(jsPath) || command.includes(shellPath);
 }
 
 // ── Args ──────────────────────────────────────────
@@ -156,6 +190,7 @@ function botSessionKey(bot) {
 
 function turnKey(state) {
   if (!state) return '';
+  if (state.turnId) return `turn:${state.turnId}`;
   const actionsLen = (state.actions || []).length;
   return `${state.handNumber}:${state.phase}:${state.currentActor}:${state.callAmount || 0}:${actionsLen}`;
 }
@@ -251,11 +286,16 @@ function buildTurnPrompt(bot, body, state) {
 // maintenance turns need the model's summary text.
 function runAgentTurn(bot, model, prompt, useResume, captureStdout = false, cancelOnTurnChange = false) {
   return new Promise((resolve) => {
-    const args = [
-      CODEX_AGENT,
-      '--session-key', botSessionKey(bot),
-      '--timeout-ms', '120000',
-    ];
+    let args;
+    try {
+      args = codexAgentArgs([
+        '--session-key', botSessionKey(bot),
+        '--timeout-ms', '120000',
+      ]);
+    } catch (err) {
+      resolve({ ok: false, text: '', stderr: err.message, canceled: false });
+      return;
+    }
     if (useResume) args.push('--resume');
     if (model) args.push('--model', model);
     args.push(prompt);
@@ -328,19 +368,26 @@ function normalizeDecision(bot, text, legalActions = []) {
     return { error: `no JSON decision in output: ${String(text || '').slice(0, 240)}` };
   }
 
-  const action = String(parsed.action || '').trim().toLowerCase();
+  let action = String(parsed.action || '').trim().toLowerCase();
   const allowed = new Set(['fold', 'check', 'call', 'raise', 'bet']);
   if (!allowed.has(action)) return { error: `invalid action: ${parsed.action}` };
 
   const legalNames = new Set((legalActions || []).map(item => String(item.action || item).toLowerCase()));
   if (legalNames.size && !legalNames.has(action)) {
-    return { error: `illegal action ${action}; legal actions: ${Array.from(legalNames).join(', ')}` };
+    if (action === 'bet' && legalNames.has('raise')) action = 'raise';
+    else if (action === 'raise' && legalNames.has('bet')) action = 'bet';
+    else return { error: `illegal action ${action}; legal actions: ${Array.from(legalNames).join(', ')}` };
   }
 
   const payload = { player: bot, action };
   if (action === 'raise' || action === 'bet') {
     const amount = Number(parsed.amount);
     if (!Number.isFinite(amount) || amount <= 0) return { error: `${action} requires a positive amount` };
+    const legal = (legalActions || []).find(item => String(item.action || item).toLowerCase() === action);
+    const min = Number(legal?.minAmount);
+    const max = Number(legal?.maxAmount);
+    if (Number.isFinite(min) && amount < min) return { error: `${action} amount ${amount} below min ${min}` };
+    if (Number.isFinite(max) && amount > max) return { error: `${action} amount ${amount} above max ${max}` };
     payload.amount = Math.floor(amount);
   }
   if (typeof parsed.chat === 'string' && parsed.chat.trim()) {
@@ -561,7 +608,7 @@ function connect() {
     switch (msg.type) {
       case 'turn':
         // Global broadcast added in poker-server.js action_required handler.
-        // Payload: { player, handNumber, phase }.
+        // Payload: { player, turnId, handNumber, phase }.
         onTurn(msg.player, msg.handNumber);
         break;
       // Everything else (welcome, chat, player_*, hand_result, etc.) we ignore.
@@ -581,8 +628,12 @@ function scheduleReconnect() {
 if (fs.existsSync(PID_FILE)) {
   const old = parseInt(fs.readFileSync(PID_FILE, 'utf8').trim(), 10);
   if (old && old !== process.pid) {
-    log.info(`killing old BotManager (PID ${old})`);
-    try { process.kill(old); } catch {}
+    if (isOwnBotManagerProcess(old)) {
+      log.info(`killing old BotManager (PID ${old})`);
+      try { process.kill(old); } catch {}
+    } else {
+      log.warn(`stale PID file points at PID ${old}, but it is not this project's BotManager; leaving it alone`);
+    }
   }
 }
 fs.writeFileSync(PID_FILE, String(process.pid));

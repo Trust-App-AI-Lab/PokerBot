@@ -26,7 +26,7 @@ Analysis and user-action proxy layer. Reads game state (or user-described hands)
 **Trigger**: strategy questions ("该不该call", "EV多少"), concept explanations ("what's SPR"), hand discussions with no active game. Inside a game, `/game` invokes this per-turn for coaching output.
 
 ### `/bot-management` — Bot lifecycle
-AI bot personalities (`bots/<name>/personality.md`), Codex thread/session mapping, and the `botmanager.js` event-driven daemon (subscribes to server WS `:3457`). On a global `turn` broadcast it invokes `scripts/codex-agent.js`, parses the bot's JSON decision, and submits the action itself. `botmanager.sh` is legacy file-mode fallback for pokernow experiments.
+AI bot personalities (`bots/<name>/personality.md`), Codex thread/session mapping, and the `botmanager.js` event-driven daemon (subscribes to server WS `:3457`). On a global `turn` broadcast it invokes StuClaw Desktop's `scripts/codex-agent.cjs` runner, parses the bot's JSON decision, and submits the action itself. `botmanager.sh` is legacy file-mode fallback for pokernow experiments.
 **Trigger**: "add bot" / "create bot" / "remove bot" / "bot stuck". Also called internally by `/game` at startup.
 
 ### `/poker-strategy` — GTO tool library
@@ -73,4 +73,4 @@ Coach + narrator (via `:3456` / `:3460`):
 
 ## Permissions
 
-默认情况下，bot 走 `scripts/codex-agent.js`，再调用 StuClaw 提供的 Codex app-server stream adapter；这条路径使用 read-only sandbox，只允许本地只读分析。需要回退时可以设置 `STUCLAW_STREAM_BACKEND=exec`，fallback 也保持 `--sandbox read-only`。Bot/CoachBot 可以跑本地只读工具，但不能写文件、联网，或直接提交牌局动作；动作只由 relay/BotManager 根据最终 JSON 代提交。
+默认情况下，bot 走 Desktop `scripts/codex-agent.cjs` runner，再调用 StuClaw 提供的 Codex app-server stream adapter；这条路径使用 read-only sandbox，只允许本地只读分析。需要回退时可以设置 `STUCLAW_STREAM_BACKEND=exec`，fallback 也保持 `--sandbox read-only`。Bot/CoachBot 可以跑本地只读工具，但不能写文件、联网，或直接提交牌局动作；动作只由 relay/BotManager 根据最终 JSON 代提交。

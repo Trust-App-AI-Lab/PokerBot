@@ -404,6 +404,73 @@
   .ctrl-sep { width: 1px; height: 20px; background: #334155; margin: 0 3px; flex: 0 0 auto; }
   .ctrl-icon { font-size: 10.5px; color: currentColor; opacity: 0.9; }
 
+  .review-bar {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 7px 12px;
+    background: #111827;
+    border-bottom: 1px solid #334155;
+  }
+  .review-meta {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 8px;
+    align-items: center;
+  }
+  .review-pill {
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #f59e0b20;
+    border: 1px solid #f59e0b60;
+    color: #fbbf24;
+    font-size: 10px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+  .review-label {
+    min-width: 0;
+    color: #cbd5e1;
+    font-size: 11px;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .review-count {
+    color: #64748b;
+    font-size: 10px;
+    font-family: ui-monospace, 'SF Mono', monospace;
+    white-space: nowrap;
+  }
+  .review-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .review-btn {
+    height: 25px;
+    min-width: 34px;
+    padding: 0 8px;
+    border-radius: 7px;
+    border: 1px solid #334155;
+    background: #0f172a;
+    color: #cbd5e1;
+    font-size: 10px;
+    font-weight: 800;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .review-btn:hover { background: #1e293b; border-color: #64748b; color: #e2e8f0; }
+  .review-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .review-slider {
+    width: 154px;
+    accent-color: #f59e0b;
+  }
+
   .paused-badge {
     background: #f59e0b; color: #1e293b; padding: 3px 12px; border-radius: 20px;
     font-size: 11px; font-weight: 700; letter-spacing: 1px;
@@ -1135,18 +1202,18 @@
   .coach-thinking {
     display: inline-flex;
     align-items: center;
-    gap: 9px;
+    gap: 7px;
     width: fit-content;
-    min-height: 30px;
-    padding: 6px 10px;
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 13px;
-    background: rgba(255,255,255,0.045);
-    color: #9ca3af;
-    font: 600 12px/1 inherit;
+    min-height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: #858c98;
+    font: 500 12px/1 inherit;
   }
   .coach-thinking.compact {
-    min-height: 26px;
+    min-height: 22px;
     padding: 3px 0;
     border: 0;
     border-radius: 0;
@@ -1163,8 +1230,8 @@
     width: 4px;
     height: 4px;
     border-radius: 999px;
-    background: var(--coach-accent);
-    opacity: 0.35;
+    background: currentColor;
+    opacity: 0.38;
     animation: coachThinkingDot 1.15s ease-in-out infinite;
   }
   .coach-thinking-dots span:nth-child(2) { animation-delay: 0.16s; }
@@ -1322,6 +1389,19 @@
       <button class="ctrl-btn ctrl-settings" id="btn-settings" onclick="toggleSettings()" title="Table settings"><span class="ctrl-icon">⚙</span><span>Settings</span></button>
     </div>
   </div>
+  <div id="review-bar" class="review-bar hidden">
+    <div class="review-meta">
+      <span id="review-pill" class="review-pill">Review</span>
+      <span id="review-label" class="review-label">Historical state</span>
+      <span id="review-count" class="review-count">0/0</span>
+    </div>
+    <div class="review-controls">
+      <button id="review-prev" type="button" class="review-btn" onclick="moveReviewStep(-1)" title="Previous action">Prev</button>
+      <input id="review-slider" class="review-slider" type="range" min="0" max="0" value="0" oninput="pullReviewStep(this.value)" title="Pull review state">
+      <button id="review-next" type="button" class="review-btn" onclick="moveReviewStep(1)" title="Next action">Next</button>
+      <button id="review-exit" type="button" class="review-btn" onclick="exitReviewMode()" title="Exit review mode">Exit</button>
+    </div>
+  </div>
 
   <!-- ── Table Control Modal ── -->
   <div id="table-modal-backdrop" class="table-modal-backdrop hidden" onclick="closeTableModal()">
@@ -1446,6 +1526,8 @@ let ws = null;
 let myName = '';
 let myCards = [];
 let currentState = null;
+let reviewSession = { active: false };
+let reviewPullTimer = null;
 let isSittingOut = false;
 let isPaused = false;
 let turnTimerInterval = null;
@@ -1531,16 +1613,19 @@ function handleMessage(msg) {
       document.getElementById('app').classList.remove('hidden');
       // Fetch full state (includes isMyTurn) to sync after reconnect
       fetch('/state').then(r => r.json()).then(s => {
+        if (reviewSession && reviewSession.active) return;
         if (s && s.phase) { currentState = s; render(currentState); }
       }).catch(() => {});
       break;
 
     case 'state':
+      if (reviewSession && reviewSession.active && !(msg.state && msg.state.reviewMode)) break;
       currentState = msg.state;
       scheduleRender(currentState);
       break;
 
     case 'cards':
+      if (reviewSession && reviewSession.active) break;
       myCards = msg.cards;
       if (currentState) {
         currentState.myCards = myCards;
@@ -1549,12 +1634,16 @@ function handleMessage(msg) {
       break;
 
     case 'your_turn':
+      if (reviewSession && reviewSession.active) break;
       // Merge turn info into state
       if (currentState) {
         currentState.isMyTurn = true;
         currentState.callAmount = msg.callAmount;
         currentState.minRaise = msg.minRaise;
         currentState.maxRaise = msg.maxRaise;
+        currentState.currentActor = myName;
+        if (msg.turnId) currentState.turnId = msg.turnId;
+        if (Array.isArray(msg.legalActions)) currentState.legalActions = msg.legalActions;
         currentState.turnDeadline = msg.turnDeadline;
         render(currentState);
       }
@@ -1613,6 +1702,10 @@ function handleMessage(msg) {
 
     case 'coach':
       addCoachMessage(msg, { fromServer: !!msg.persisted });
+      break;
+
+    case 'review':
+      handleReviewMessage(msg);
       break;
 
     case 'coach-mode':
@@ -2043,37 +2136,22 @@ function startStreamingCoachBubble(msg) {
   if (!log) return;
   const role = msg.role || 'assistant';
   const ts = msg.ts || new Date().toISOString();
-  setCoachThinking(false);
   pruneEmptyStreamingCoachBubbles(msg.id);
 
-  const div = document.createElement('div');
-  div.className = 'coach-msg ' + role + ' streaming';
-  div.dataset.ts = ts;
-  const worklog = document.createElement('div');
-  worklog.className = 'coach-stream-worklog hidden';
-  const worklogTitle = document.createElement('div');
-  worklogTitle.className = 'coach-work-title';
-  worklogTitle.textContent = 'Process';
-  const cardList = document.createElement('div');
-  cardList.className = 'coach-stream-card-list';
-  worklog.appendChild(worklogTitle);
-  worklog.appendChild(cardList);
-  const body = document.createElement('div');
-  body.className = 'coach-msg-body markdown-content';
-  body.innerHTML = coachThinkingMarkup({ compact: true });
-  div.appendChild(worklog);
-  div.appendChild(body);
-
   const thinking = document.getElementById('coach-thinking-indicator');
-  if (thinking && thinking.parentNode === log) log.insertBefore(div, thinking);
-  else log.appendChild(div);
+  const shell = thinking && thinking.parentNode === log
+    ? reuseCoachThinkingShell(thinking, role, ts)
+    : createCoachStreamingShell(role, ts);
+  const div = shell.el;
+
+  if (div.parentNode !== log) log.appendChild(div);
 
   streamingCoachBubbles.set(msg.id, {
     el: div,
-    bodyEl: body,
-    worklog,
-    worklogTitle,
-    cardList,
+    bodyEl: shell.body,
+    worklog: shell.worklog,
+    worklogTitle: shell.worklogTitle,
+    cardList: shell.cardList,
     cardData: new Map(),
     cards: new Map(),
     agentMessagePhases: {},
@@ -2359,7 +2437,7 @@ function render(state) {
   const pot = state.pot || 0;
   const cards = state.myCards || myCards || [];
   const community = state.communityCards || [];
-  const isMyTurn = state.isMyTurn || (myName && state.currentActor === myName) || false;
+  const isMyTurn = !state.reviewMode && (state.isMyTurn || (myName && state.currentActor === myName) || false);
   const ca = state.callAmount || 0;
   const mnr = state.minRaise || 0;
   const mxr = state.maxRaise || 0;
@@ -2557,7 +2635,9 @@ function render(state) {
     </div>`;
   }).join('');
 
-  document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+  document.getElementById('last-update').textContent = state.reviewMode
+    ? `Review state: ${state.reviewStepIndex + 1}/${state.reviewStepTotal}`
+    : 'Updated: ' + new Date().toLocaleTimeString();
 
   // Update paused state from server
   if (state.paused !== undefined) isPaused = state.paused;
@@ -2608,6 +2688,89 @@ function addChatMessage(player, message) {
   // Cap DOM entries to prevent memory growth
   while (logEl.children.length > 50) logEl.removeChild(logEl.firstChild);
   logEl.scrollTop = logEl.scrollHeight;
+}
+
+function handleReviewMessage(msg) {
+  reviewSession = msg && msg.active ? { ...msg, active: true } : { active: false };
+  updateReviewBar();
+  if (reviewSession.active && reviewSession.current && reviewSession.current.state) {
+    currentState = reviewSession.current.state;
+    myCards = currentState.myCards || [];
+    render(currentState);
+  }
+  updateControlButtons();
+}
+
+function updateReviewBar() {
+  const bar = document.getElementById('review-bar');
+  if (!bar) return;
+  const active = !!(reviewSession && reviewSession.active);
+  bar.classList.toggle('hidden', !active);
+  if (!active) return;
+
+  const current = reviewSession.current || {};
+  const state = current.state || {};
+  const index = Number(reviewSession.index || 0);
+  const total = Math.max(1, Number(reviewSession.total || 1));
+  const label = current.label || state.reviewStepLabel || 'Historical state';
+
+  document.getElementById('review-pill').textContent = `Hand #${reviewSession.hand || state.handNumber || '?'}`;
+  document.getElementById('review-label').textContent = label;
+  document.getElementById('review-count').textContent = `${index + 1}/${total}`;
+
+  const slider = document.getElementById('review-slider');
+  if (slider) {
+    slider.max = String(total - 1);
+    slider.value = String(index);
+  }
+  const prev = document.getElementById('review-prev');
+  const next = document.getElementById('review-next');
+  if (prev) prev.disabled = index <= 0;
+  if (next) next.disabled = index >= total - 1;
+}
+
+async function postReviewAction(action, payload) {
+  try {
+    const res = await fetch('/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, ...(payload || {}) }),
+    });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok || out.ok === false) throw new Error(out.error || `Review failed (${res.status})`);
+    if (out && typeof out.active === 'boolean') handleReviewMessage(out);
+  } catch (err) {
+    addChatMessage('Error', err.message || 'Review control failed');
+  }
+}
+
+function moveReviewStep(delta) {
+  if (!reviewSession || !reviewSession.active) return;
+  if (reviewPullTimer) {
+    clearTimeout(reviewPullTimer);
+    reviewPullTimer = null;
+  }
+  const total = Math.max(1, Number(reviewSession.total || 1));
+  const index = Math.max(0, Math.min(total - 1, Number(reviewSession.index || 0) + delta));
+  postReviewAction('goto', { index });
+}
+
+function pullReviewStep(value) {
+  if (!reviewSession || !reviewSession.active) return;
+  const index = Number(value) || 0;
+  if (reviewPullTimer) clearTimeout(reviewPullTimer);
+  reviewPullTimer = setTimeout(() => {
+    reviewPullTimer = null;
+    postReviewAction('goto', { index });
+  }, 70);
+}
+
+function exitReviewMode() {
+  if (reviewPullTimer) {
+    clearTimeout(reviewPullTimer);
+    reviewPullTimer = null;
+  }
+  postReviewAction('exit');
 }
 
 // ══════════════════════════════════════════════════
@@ -2789,10 +2952,47 @@ function durationLabel(ms) {
 function coachThinkingMarkup(opts) {
   const compact = opts && opts.compact ? ' compact' : '';
   return `<span class="coach-thinking${compact}" aria-live="polite">`
-    + '<span class="coach-thinking-label">CoachBot thinking</span>'
+    + '<span class="coach-thinking-label">Thinking</span>'
     + '<span class="coach-thinking-dots" aria-hidden="true">'
     + '<span></span><span></span><span></span>'
     + '</span></span>';
+}
+
+function createCoachStreamingShell(role, ts) {
+  const div = document.createElement('div');
+  div.className = 'coach-msg ' + (role || 'assistant') + ' streaming';
+  if (ts) div.dataset.ts = ts;
+  const worklog = document.createElement('div');
+  worklog.className = 'coach-stream-worklog hidden';
+  const worklogTitle = document.createElement('div');
+  worklogTitle.className = 'coach-work-title';
+  worklogTitle.textContent = 'Process';
+  const cardList = document.createElement('div');
+  cardList.className = 'coach-stream-card-list';
+  worklog.appendChild(worklogTitle);
+  worklog.appendChild(cardList);
+  const body = document.createElement('div');
+  body.className = 'coach-msg-body markdown-content';
+  body.innerHTML = coachThinkingMarkup({ compact: true });
+  div.appendChild(worklog);
+  div.appendChild(body);
+  return { el: div, body, worklog, worklogTitle, cardList };
+}
+
+function reuseCoachThinkingShell(div, role, ts) {
+  div.removeAttribute('id');
+  div.className = 'coach-msg ' + (role || 'assistant') + ' streaming';
+  if (ts) div.dataset.ts = ts;
+  const worklog = div.querySelector('.coach-stream-worklog');
+  const worklogTitle = div.querySelector('.coach-work-title');
+  const cardList = div.querySelector('.coach-stream-card-list');
+  const body = div.querySelector('.coach-msg-body');
+  if (worklog && worklogTitle && cardList && body) {
+    return { el: div, body, worklog, worklogTitle, cardList };
+  }
+  const replacement = createCoachStreamingShell(role, ts);
+  div.replaceWith(replacement.el);
+  return replacement;
 }
 
 // ── Coach-log scroll gating ──
@@ -3238,11 +3438,8 @@ function setCoachThinking(on, opts) {
   let indicator = document.getElementById('coach-thinking-indicator');
   if (on) {
     if (!indicator) {
-      indicator = document.createElement('div');
+      indicator = createCoachStreamingShell('assistant', new Date().toISOString()).el;
       indicator.id = 'coach-thinking-indicator';
-      indicator.className = 'coach-thinking';
-      indicator.innerHTML = '<span class="coach-thinking-label">CoachBot thinking</span>'
-        + '<span class="coach-thinking-dots" aria-hidden="true"><span></span><span></span><span></span></span>';
       log.appendChild(indicator);
       scrollCoachIfNear();
     }
@@ -3254,6 +3451,27 @@ function setCoachThinking(on, opts) {
     if (input) input.disabled = false;
     if (sendBtn) sendBtn.disabled = false;
   }
+}
+
+function isExplicitCoachActionRequest(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  const lower = raw.toLowerCase();
+  const hasAction = /(fold|check|call|bet|raise|all[-\s]?in|弃牌|过牌|看牌|跟注|跟|下注|加注|全下)/i.test(raw);
+  if (!hasAction) return false;
+  const hasExecutionIntent = /(帮我|替我|给我|为我|执行|提交|点|按|选|打|操作|行动|直接|就这样|就这个|act|execute|submit|play|do it|go ahead|for me)/i.test(raw);
+  const startsWithAction = /^\s*(?:直接|就|那就|现在|please\s+)?(fold|check|call|bet|raise|all[-\s]?in|弃牌|过牌|看牌|跟注|跟|下注|加注|全下)\b/i.test(raw);
+  const endsLikeCommand = /(fold|check|call|bet|raise|弃牌|过牌|跟注|下注|加注).{0,16}(吧|了|就行|就这样|for me)$/i.test(raw);
+  const adviceOnly = /(应该|能不能|可不可以|是否|是不是|要不要|建议|分析|怎么看|what|should|could|can i|do you think|\?)\s*/i.test(lower)
+    && !/(帮我|替我|执行|提交|直接|act|execute|submit|play|do it|for me)/i.test(lower);
+  return !adviceOnly && (hasExecutionIntent || startsWithAction || endsLikeCommand);
+}
+
+function shouldAllowCoachAction(text) {
+  if (!currentState || currentState.reviewMode) return false;
+  const livePhase = currentState.phase && !['waiting', 'showdown', 'ended'].includes(currentState.phase);
+  const myTurn = currentState.isMyTurn || (myName && currentState.currentActor === myName);
+  return !!(livePhase && myTurn && isExplicitCoachActionRequest(text));
 }
 
 async function askCoach() {
@@ -3268,7 +3486,7 @@ async function askCoach() {
     const res = await fetch('/coach-ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: q, displayQuestion: q, allowAction: false }),
+      body: JSON.stringify({ question: q, displayQuestion: q, allowAction: shouldAllowCoachAction(q) }),
     });
     const payload = await res.json().catch(() => null);
     if (!res.ok || (payload && payload.ok === false)) {
@@ -3356,6 +3574,11 @@ setTimeout(fitScaler, 500);
 // ══════════════════════════════════════════════════
 
 function sendWS(type, data) {
+  const liveCommand = ['start', 'pause', 'resume', 'settings', 'sit_out', 'sit_back', 'rebuy', 'kick'].includes(type);
+  if (reviewSession && reviewSession.active && liveCommand) {
+    addChatMessage('System', 'Exit review mode before changing the live table');
+    return false;
+  }
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type, ...data }));
     return true;
@@ -3368,6 +3591,10 @@ function sendWS(type, data) {
 // Submit through relay HTTP so errors are visible and state refreshes
 // immediately after the upstream server accepts the action.
 async function submitAction(payload) {
+  if (reviewSession && reviewSession.active) {
+    addChatMessage('System', 'Review mode is view-only. Exit review mode before playing live actions.');
+    return;
+  }
   try {
     const res = await fetch('/action', {
       method: 'POST',
@@ -3550,13 +3777,14 @@ function kickPlayer(name) {
 
 function updateControlButtons() {
   const connected = !!(ws && ws.readyState === WebSocket.OPEN);
+  const inReview = !!(reviewSession && reviewSession.active);
   const btnSitout = document.getElementById('btn-sitout');
   if (btnSitout) {
     btnSitout.innerHTML = isSittingOut
       ? '<span class="ctrl-icon">↩</span><span>Sit back</span>'
       : '<span class="ctrl-icon">--</span><span>Sit out</span>';
     btnSitout.className = isSittingOut ? 'ctrl-btn ctrl-start active' : 'ctrl-btn ctrl-sitout';
-    btnSitout.disabled = !connected;
+    btnSitout.disabled = !connected || inReview;
   }
   const btnPause = document.getElementById('btn-pause');
   if (btnPause) {
@@ -3564,23 +3792,23 @@ function updateControlButtons() {
       ? '<span class="ctrl-icon">▶</span><span>Resume</span>'
       : '<span class="ctrl-icon">Ⅱ</span><span>Pause</span>';
     btnPause.className = isPaused ? 'ctrl-btn ctrl-start active' : 'ctrl-btn ctrl-pause';
-    btnPause.disabled = !connected;
+    btnPause.disabled = !connected || inReview;
   }
   document.getElementById('paused-badge')?.classList.toggle('hidden', !isPaused);
   // Show start button only when waiting
   const btnStart = document.getElementById('btn-start');
   if (btnStart && currentState) {
-    btnStart.style.display = currentState.phase === 'waiting' ? '' : 'none';
-    btnStart.disabled = !connected || currentState.phase !== 'waiting';
+    btnStart.style.display = !inReview && currentState.phase === 'waiting' ? '' : 'none';
+    btnStart.disabled = !connected || inReview || currentState.phase !== 'waiting';
   }
   const btnRebuy = document.getElementById('btn-rebuy');
-  if (btnRebuy) btnRebuy.disabled = !connected;
+  if (btnRebuy) btnRebuy.disabled = !connected || inReview;
   const btnSettings = document.getElementById('btn-settings');
   if (btnSettings) {
     btnSettings.className = activeTableModal === 'settings'
       ? 'ctrl-btn ctrl-settings active'
       : 'ctrl-btn ctrl-settings';
-    btnSettings.disabled = !connected;
+    btnSettings.disabled = !connected || inReview;
   }
 }
 

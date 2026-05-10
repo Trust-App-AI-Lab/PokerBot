@@ -106,11 +106,19 @@ Treat PokerNow as a fallback adapter. Keep the user's action decisions in the Po
 
 ### 2A. Review From History
 
-Do not start a new game. If the relay is running, read recent hands from history and summarize decision points. If no relay is running, use saved history under `game-data/<name>/history/` when available.
+Do not analyze the hands in the foreground StuClaw chat. Review mode is a PokerBot/CoachBot app state: the relay replays saved history into the same visual `state` shape used during live play. The user reviews in the PokerBot window, manually pulls the review state with the review bar, and asks follow-up questions in the left CoachBot chatbox.
+
+If the relay is already running and no live hand is in progress, start review mode:
+
+```bash
+curl -s -X POST localhost:3456/review -H "Content-Type: application/json" -d '{"action":"start"}'
+```
+
+Then open or reuse `http://localhost:3456`. If the endpoint returns 409, tell the user review mode is disabled while a live hand is in progress. If it returns no history, explain that completed hands are needed before review. If no relay is running, do not start a new live table just to play; ask for the player name needed to open their saved profile in review mode, or explain that saved hand review is available once PokerBot is opened for that player.
 
 ### 2B. Manual Review
 
-Ask the user to paste or describe the hand. Route strategic analysis through `coachbot`; do not start PokerBot.
+Manual review can also happen in the CoachBot chatbox, but prefer structured state replay whenever history exists. Ask the user to paste or describe the hand there only when no saved history is available; do not start a new table unless the user switches to play mode.
 
 ### 3. Learn
 

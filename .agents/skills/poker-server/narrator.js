@@ -102,8 +102,9 @@ function isActionableTurn(state) {
 
 function turnKeyFor(state) {
   if (!state) return '';
+  if (state.turnId) return `turn:${state.turnId}`;
   const actsLen = (state.actions || state.recentActions || []).length;
-  return `${state.handNumber}:${state.phase}:${state.callAmount || 0}:${actsLen}`;
+  return `${state.handNumber}:${state.phase}:${state.currentActor || ''}:${state.callAmount || 0}:${actsLen}`;
 }
 
 function drainPendingCoachWork() {
@@ -177,13 +178,16 @@ function stateSummary() {
     const tag = p.name === myName ? '(me)' : '';
     return `${p.name}${tag} seat=${p.seat} stack=$${p.stack} bet=$${p.bet || 0}${p.folded ? ' FOLDED' : ''}${p.allIn ? ' ALL-IN' : ''}`;
   }).join(' | ');
-  const board = (s.board || []).join(' ') || '(no board)';
+  const board = (s.communityCards || s.board || []).join(' ') || '(no board)';
   const pot = s.pot || 0;
   const positions = s.positions ? JSON.stringify(s.positions) : '{}';
-  const recent = (s.recentActions || []).slice(-8).map(a =>
+  const recent = (s.actions || s.recentActions || []).slice(-8).map(a =>
     `${a.actor} ${a.action}${a.amount ? ' ' + a.amount : ''}`
   ).join(' → ');
   const cards = myCards.length ? myCards.join(' ') : '(hidden)';
+  const legal = Array.isArray(s.legalActions) && s.legalActions.length
+    ? s.legalActions.map(a => a.action || a).join(', ')
+    : '';
   return [
     `Hand #${s.handNumber || '?'} phase=${s.phase}`,
     `My cards: ${cards}`,
@@ -193,6 +197,7 @@ function stateSummary() {
     `Players: ${players}`,
     `Recent: ${recent || '(none)'}`,
     s.isMyTurn ? `★ MY TURN — callAmount=$${s.callAmount || 0} minRaise=$${s.minRaise || 0} maxRaise=$${s.maxRaise || 0}` : '',
+    legal ? `Legal actions: ${legal}` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -434,6 +439,9 @@ function connect() {
           currentState.callAmount = msg.callAmount;
           currentState.minRaise = msg.minRaise;
           currentState.maxRaise = msg.maxRaise;
+          if (myName) currentState.currentActor = myName;
+          if (msg.turnId) currentState.turnId = msg.turnId;
+          if (Array.isArray(msg.legalActions)) currentState.legalActions = msg.legalActions;
         }
         handleYourTurn();
         break;

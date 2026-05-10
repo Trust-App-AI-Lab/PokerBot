@@ -22,5 +22,5 @@ This folder owns PokerBot's local self-hosted table.
 ## Session Boundary
 
 The server never talks to Codex directly. Bot and CoachBot turns go through
-`scripts/codex-agent.js`, which maps stable logical keys to Codex thread ids in
-`.stuclaw/sessions.json`.
+StuClaw Desktop's `scripts/codex-agent.cjs`, which maps stable logical keys to
+Codex thread ids in `.stuclaw/sessions.json`.

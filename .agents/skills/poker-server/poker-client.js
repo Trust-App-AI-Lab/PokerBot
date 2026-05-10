@@ -92,12 +92,46 @@ const PROJECT_ROOT = path.join(__dirname, '..', '..', '..');
 const PROFILE_DIR  = path.join(PROJECT_ROOT, 'game-data', CONFIG.name);
 const STATE_FILE   = path.join(PROFILE_DIR, 'state.json');
 const HISTORY_DIR  = path.join(PROFILE_DIR, 'history');
-const CODEX_EVENTS_DIR = path.join(PROFILE_DIR, 'codex-events');
 const COACH_CHAT_FILE = path.join(PROFILE_DIR, 'coach-chat.jsonl');
 const TABLE_HTML   = path.join(__dirname, 'public', 'poker-table.html');
 const COACH_SKILL_MD = path.join(PROJECT_ROOT, '.agents', 'skills', 'coachbot', 'SKILL.md');
-const CODEX_AGENT = path.join(PROJECT_ROOT, 'scripts', 'codex-agent.js');
 const NODE_BIN = process.execPath || process.env.NODE || 'node';
+
+function readPathsEnv() {
+  const envPath = path.join(PROJECT_ROOT, 'paths.env');
+  const pins = {};
+  if (!fs.existsSync(envPath)) return pins;
+  for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+    const match = line.match(/^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)=(.*?)\s*$/);
+    if (!match) continue;
+    pins[match[1]] = String(match[2] || '').replace(/^["']|["']$/g, '').replace(/\$HOME\b/g, process.env.HOME || '');
+  }
+  return pins;
+}
+
+function resolveDesktopCodexAgent() {
+  const pins = readPathsEnv();
+  const candidates = [
+    process.env.STUCLAW_CODEX_AGENT,
+    pins.STUCLAW_CODEX_AGENT,
+    process.env.STUCLAW_DESKTOP_ROOT && path.join(process.env.STUCLAW_DESKTOP_ROOT, 'scripts', 'codex-agent.cjs'),
+    path.resolve(PROJECT_ROOT, '..', 'stuclaw-desktop', 'scripts', 'codex-agent.cjs'),
+    path.resolve(PROJECT_ROOT, '..', '..', 'scripts', 'codex-agent.cjs'),
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return '';
+}
+
+const CODEX_AGENT = resolveDesktopCodexAgent();
+
+function codexAgentArgs(args) {
+  if (!CODEX_AGENT) {
+    throw new Error('StuClaw Desktop codex-agent runner not found. Set STUCLAW_CODEX_AGENT to stuclaw-desktop/scripts/codex-agent.cjs.');
+  }
+  return [CODEX_AGENT, '--app-dir', PROJECT_ROOT, ...args];
+}
 
 // Single source of truth for CoachBot's model: the frontmatter `model:`
 // field in coachbot/SKILL.md. Both this relay and start-game.sh read the
@@ -119,19 +153,25 @@ const COACH_MODEL = readCoachModel();
 try {
   if (!fs.existsSync(PROFILE_DIR)) fs.mkdirSync(PROFILE_DIR, { recursive: true });
   if (!fs.existsSync(HISTORY_DIR)) fs.mkdirSync(HISTORY_DIR, { recursive: true });
-  if (!fs.existsSync(CODEX_EVENTS_DIR)) fs.mkdirSync(CODEX_EVENTS_DIR, { recursive: true });
 } catch (e) {
   console.error(`Failed to create data directories: ${e.message}`);
   process.exit(1);
 }
 
-// ── CoachBot logical session key mapped by scripts/codex-agent.js ──
+// ── CoachBot logical session key mapped by StuClaw Desktop's codex-agent.cjs ──
 const COACH_SESSION_KEY = `coachbot-${CONFIG.name}`;
-// Stable browser cache key. The durable source is coach-chat.jsonl; tying this
-// to process start time makes a relay restart look like a brand-new game and
-// causes the UI to wipe already-hydrated CoachBot history.
-const GAME_ID = COACH_SESSION_KEY;
-const COACH_CODEX_FILE = path.join(CODEX_EVENTS_DIR, `${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}-${COACH_SESSION_KEY}.jsonl`);
+function readGameId() {
+  try {
+    const id = fs.readFileSync(path.join(PROJECT_ROOT, 'game-data', '.current-game-id'), 'utf8').trim();
+    if (id) return id;
+  } catch (_) { /* fall through */ }
+  return COACH_SESSION_KEY;
+}
+
+// Browser cache key for the current launched game. start-game.sh writes a
+// fresh id per new runtime so stop/start clears old UI records, while relay
+// restarts inside the same runtime keep the hydrated CoachBot timeline.
+const GAME_ID = readGameId();
 const coachChatIds = new Set();
 const coachChatKeys = new Set();
 
@@ -161,23 +201,6 @@ function logEvent(event) {
     historyHandCount++;
   }
   appendJsonl(historyFile, event, e => log.warn(`Failed to write history: ${e.message}`));
-}
-
-function logCoachCodexEvent(event, extra = {}) {
-  if (!event || typeof event !== 'object') return;
-  const record = {
-    recorded_at: new Date().toISOString(),
-    stream_schema: 'stuclaw.codex-stream.v1',
-    source: 'coachbot',
-    sessionKey: COACH_SESSION_KEY,
-    ...extra,
-    ...event,
-  };
-  try {
-    fs.appendFileSync(COACH_CODEX_FILE, JSON.stringify(record) + '\n');
-  } catch (e) {
-    log.warn(`Failed to write CoachBot codex event: ${e.message}`);
-  }
 }
 
 function loadCoachChatIds() {
@@ -354,6 +377,493 @@ function readCoachChatPage({ before, limit }) {
   return { messages: filtered.slice(-max), hasMore };
 }
 
+function listHistoryFiles() {
+  if (!fs.existsSync(HISTORY_DIR)) return [];
+  return fs.readdirSync(HISTORY_DIR)
+    .filter(f => f.endsWith('.jsonl'))
+    .sort()
+    .map(f => path.join(HISTORY_DIR, f));
+}
+
+function readHistoryEvents(files) {
+  let events = [];
+  for (const fp of files) {
+    try {
+      const content = fs.readFileSync(fp, 'utf-8').trim();
+      if (!content) continue;
+      events = events.concat(content.split('\n').map(line => {
+        try { return JSON.parse(line); } catch { return null; }
+      }).filter(Boolean));
+    } catch (e) {
+      log.warn(`Failed to read history file ${path.basename(fp)}: ${e.message}`);
+    }
+  }
+  return events;
+}
+
+function readHistoryHands({ session = '', last = 0 } = {}) {
+  let filesToRead = [];
+  if (session) {
+    const fp = path.join(HISTORY_DIR, path.basename(session));
+    if (fs.existsSync(fp)) filesToRead = [fp];
+  } else if (last > 0) {
+    filesToRead = listHistoryFiles();
+    const legacyFile = path.join(PROFILE_DIR, 'history.jsonl');
+    if (fs.existsSync(legacyFile)) filesToRead.unshift(legacyFile);
+  } else {
+    if (fs.existsSync(historyFile)) filesToRead = [historyFile];
+    const legacyFile = path.join(PROFILE_DIR, 'history.jsonl');
+    if (filesToRead.length === 0 && fs.existsSync(legacyFile)) filesToRead = [legacyFile];
+  }
+  const hands = reconstructHands(readHistoryEvents(filesToRead));
+  return last > 0 ? hands.slice(-last) : hands;
+}
+
+function completedHistoryHands(hands) {
+  return (hands || []).filter(hand => !hand.incomplete && Array.isArray(hand.results) && hand.results.length);
+}
+
+function listReviewHistoryFiles() {
+  const files = listHistoryFiles();
+  const legacyFile = path.join(PROFILE_DIR, 'history.jsonl');
+  if (fs.existsSync(legacyFile)) files.unshift(legacyFile);
+  return files;
+}
+
+function historyEventType(ev) {
+  return String(ev && ev.type || '');
+}
+
+function reconstructReviewHandRecords(events) {
+  const records = [];
+  let cur = [];
+  for (const ev of events || []) {
+    const type = historyEventType(ev);
+    if (type === 'hand_start' || type === 'hand.started') {
+      cur = [ev];
+      continue;
+    }
+    if (!cur.length) continue;
+    const handNum = cur[0] && cur[0].hand;
+    if (ev.hand !== handNum) continue;
+    cur.push(ev);
+    if (type === 'hand_end' || type === 'hand.ended') {
+      const hand = reconstructHands(cur)[0];
+      if (hand && !hand.incomplete && Array.isArray(hand.results) && hand.results.length) {
+        records.push({
+          id: `${hand.ts || cur[0].ts || 'hand'}-${hand.hand}-${records.length}`,
+          hand,
+          events: cur.slice(),
+        });
+      }
+      cur = [];
+    }
+  }
+  return records;
+}
+
+function numberOrZero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function cloneReviewPlayers(players) {
+  return players.map(p => ({
+    name: p.name,
+    seat: p.seat,
+    stack: p.stack,
+    bet: p.bet,
+    folded: !!p.folded,
+    allIn: !!p.allIn,
+    sittingOut: !!p.sittingOut,
+    isMe: !!p.isMe,
+    cards: Array.isArray(p.cards) ? [...p.cards] : [],
+  }));
+}
+
+function normalizeReviewAction(ev) {
+  return {
+    actor: ev.actor || ev.player || '',
+    action: ev.action || ev.type || '',
+    phase: ev.phase || '',
+    amount: ev.amount ?? null,
+    ts: ev.ts || '',
+  };
+}
+
+function formatReviewAction(action) {
+  if (!action) return '';
+  const actor = action.actor || '?';
+  const verb = ACT_NAME[action.action] || action.action || 'action';
+  const amount = action.amount != null && action.amount !== '' ? ` $${action.amount}` : '';
+  const phase = action.phase ? `${action.phase} · ` : '';
+  return `${phase}${actor} ${verb}${amount}`;
+}
+
+function buildReviewSnapshots(record) {
+  const start = (record.events || []).find(ev => ['hand_start', 'hand.started'].includes(historyEventType(ev)));
+  const hand = record.hand || {};
+  const startPlayers = (start && start.players) || hand.players || {};
+  const names = Object.keys(startPlayers);
+  const positions = (start && start.positions) || hand.positions || {};
+  const blinds = (start && start.blinds) || hand.blinds || [];
+  const players = names.map((name, seat) => {
+    const raw = startPlayers[name] || [];
+    const cards = Array.isArray(raw) && Array.isArray(raw[0]) ? raw[0] : [];
+    const stack = Array.isArray(raw) ? numberOrZero(raw[1]) : numberOrZero(raw.stack);
+    return {
+      name,
+      seat,
+      stack,
+      bet: 0,
+      folded: false,
+      allIn: false,
+      sittingOut: false,
+      isMe: name === CONFIG.name,
+      cards: name === CONFIG.name ? cards.slice() : [],
+    };
+  });
+  const dealerName = Object.entries(positions).find(([, pos]) => pos === 'BTN')?.[0];
+  const dealerSeat = Math.max(0, players.findIndex(p => p.name === dealerName));
+  const heroRaw = startPlayers[CONFIG.name] || [];
+  const heroCards = Array.isArray(heroRaw) && Array.isArray(heroRaw[0]) ? heroRaw[0].slice() : [];
+  const actions = [];
+  const board = [];
+  let phase = 'preflop';
+  let pot = 0;
+  let currentBet = 0;
+
+  const makeState = (meta) => ({
+    reviewMode: true,
+    reviewHandId: record.id,
+    reviewStepKind: meta.kind,
+    reviewStepLabel: meta.label,
+    phase,
+    paused: false,
+    handNumber: hand.hand,
+    pot,
+    communityCards: board.slice(),
+    players: cloneReviewPlayers(players),
+    actions: actions.map(a => ({ ...a })),
+    currentActor: meta.actor || null,
+    dealerSeat,
+    positions,
+    smallBlind: numberOrZero(blinds[0]) || currentState?.smallBlind || 10,
+    bigBlind: numberOrZero(blinds[1]) || currentState?.bigBlind || 20,
+    maxPlayers: currentState?.maxPlayers || Math.max(players.length, 2),
+    autoStart: false,
+    currentBet,
+    timestamp: Date.now(),
+    myCards: heroCards.slice(),
+    myStack: players.find(p => p.name === CONFIG.name)?.stack || 0,
+    isMyTurn: false,
+  });
+
+  const steps = [];
+  const pushStep = (kind, label, action) => {
+    steps.push({
+      kind,
+      label,
+      hand: hand.hand,
+      action: action ? { ...action } : null,
+      previousActions: actions.map(formatReviewAction),
+      state: makeState({ kind, label, actor: action?.actor || null }),
+    });
+  };
+
+  pushStep('start', `Hand #${hand.hand} start`, null);
+
+  for (const ev of record.events || []) {
+    const type = historyEventType(ev);
+    if (type === 'player.action' || type === 'action') {
+      const action = normalizeReviewAction(ev);
+      if (action.phase) phase = action.phase;
+      const p = players.find(player => player.name === action.actor);
+      if (p) {
+        const amount = numberOrZero(action.amount);
+        if (action.action === 'fold') {
+          p.folded = true;
+        } else if (['small_blind', 'big_blind', 'call'].includes(action.action)) {
+          const inc = Math.max(0, amount);
+          p.bet += inc;
+          p.stack = Math.max(0, p.stack - inc);
+          pot += inc;
+          currentBet = Math.max(currentBet, p.bet);
+        } else if (action.action === 'bet' || action.action === 'raise') {
+          const inc = Math.max(0, amount - p.bet);
+          p.bet += inc;
+          p.stack = Math.max(0, p.stack - inc);
+          pot += inc;
+          currentBet = Math.max(currentBet, p.bet);
+        }
+        if (p.stack <= 0) p.allIn = true;
+      }
+      actions.push(action);
+      pushStep('action', formatReviewAction(action), action);
+      continue;
+    }
+    if (type === 'street.dealt' || type === 'board') {
+      phase = ev.phase || phase;
+      if (Array.isArray(ev.board) && ev.board.length) {
+        board.splice(0, board.length, ...ev.board);
+      } else if (Array.isArray(ev.cards) && ev.cards.length) {
+        if (type === 'street.dealt' && board.length && ev.cards.length <= 2) board.push(...ev.cards);
+        else board.splice(0, board.length, ...ev.cards);
+      }
+      for (const p of players) p.bet = 0;
+      currentBet = 0;
+      pushStep('street', `${phase} dealt${board.length ? `: ${board.join(' ')}` : ''}`, null);
+      continue;
+    }
+    if (type === 'hand_end' || type === 'hand.ended') {
+      phase = 'showdown';
+      pot = ev.pot ?? hand.pot ?? pot;
+      if (Array.isArray(ev.board) && ev.board.length) board.splice(0, board.length, ...ev.board);
+      const finalStacks = ev.stacks || hand.stacks || {};
+      const shownCards = ev.shownCards || hand.shownCards || {};
+      for (const p of players) {
+        p.bet = 0;
+        if (finalStacks[p.name] != null) p.stack = numberOrZero(finalStacks[p.name]);
+        if (p.name === CONFIG.name && heroCards.length) p.cards = heroCards.slice();
+        else if (Array.isArray(shownCards[p.name])) p.cards = shownCards[p.name].slice();
+      }
+      currentBet = 0;
+      pushStep('result', Array.isArray(hand.results) ? hand.results.join(', ') : 'Hand result', null);
+    }
+  }
+
+  const total = steps.length;
+  return steps.map((step, index) => ({
+    ...step,
+    index,
+    total,
+    state: {
+      ...step.state,
+      reviewStepIndex: index,
+      reviewStepTotal: total,
+    },
+  }));
+}
+
+function isLiveHandInProgress(state = currentState) {
+  return !!(state && state.phase && !['waiting', 'showdown', 'ended'].includes(state.phase));
+}
+
+function reviewSessionPayload(session) {
+  if (!session || !session.steps || !session.steps.length) return { active: false };
+  const index = Math.max(0, Math.min(session.index || 0, session.steps.length - 1));
+  const current = session.steps[index];
+  return {
+    active: true,
+    hand: session.hand,
+    index,
+    total: session.steps.length,
+    current,
+  };
+}
+
+function createReviewSession(opts = {}) {
+  const events = readHistoryEvents(listReviewHistoryFiles());
+  const records = reconstructReviewHandRecords(events);
+  if (!records.length) return { error: 'no_history' };
+  const wantedHand = Number(opts.hand || 0);
+  const record = wantedHand
+    ? [...records].reverse().find(r => Number(r.hand.hand) === wantedHand)
+    : records[records.length - 1];
+  if (!record) return { error: 'hand_not_found', hand: wantedHand };
+  const steps = buildReviewSnapshots(record);
+  if (!steps.length) return { error: 'no_steps' };
+  return {
+    id: `review-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    hand: record.hand.hand,
+    recordId: record.id,
+    startedAt: new Date().toISOString(),
+    index: Math.max(0, Math.min(Number(opts.index || 0), steps.length - 1)),
+    steps,
+  };
+}
+
+function buildReviewStateBlock(session) {
+  const payload = reviewSessionPayload(session);
+  if (!payload.active) return '';
+  const step = payload.current;
+  const state = step.state || {};
+  const hero = (state.players || []).find(p => p.name === CONFIG.name) || {};
+  const board = Array.isArray(state.communityCards) && state.communityCards.length
+    ? state.communityCards.join(' ')
+    : '(none)';
+  const players = (state.players || []).map(p => {
+    const pos = state.positions && state.positions[p.name] ? ` ${state.positions[p.name]}` : '';
+    const flags = [p.folded ? 'folded' : '', p.allIn ? 'all-in' : ''].filter(Boolean).join(' ');
+    return `${p.name}${pos}: stack=${p.stack}, bet=${p.bet}${flags ? `, ${flags}` : ''}`;
+  });
+  const previousActions = (step.previousActions || []).slice(-30);
+  return [
+    '[REVIEW STATE]',
+    'Mode: historical hand review. Do not submit live poker actions.',
+    `Hero: ${CONFIG.name}`,
+    `Hand #${payload.hand}, step ${payload.index + 1}/${payload.total}`,
+    `Current focus: ${step.label || 'review state'}`,
+    `Phase: ${state.phase || '?'}`,
+    `Pot: ${state.pot || 0}`,
+    `Hero cards: ${Array.isArray(hero.cards) && hero.cards.length ? hero.cards.join(' ') : '(unknown)'}`,
+    `Board: ${board}`,
+    players.length ? `Players: ${players.join('; ')}` : 'Players: (unknown)',
+    previousActions.length ? 'Actions so far:\n- ' + previousActions.join('\n- ') : 'Actions so far: (none)',
+    '[/REVIEW STATE]',
+  ].join('\n');
+}
+
+function chineseNumberValue(text) {
+  const map = { 一: 1, 两: 2, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+  return map[text] || 0;
+}
+
+function detectHistoryReviewRequest(question) {
+  const text = String(question || '').trim();
+  const lower = text.toLowerCase();
+  const simpleAnalysis =
+    /(上一手|上手|最近.{0,6}手|前.{0,6}手|第\s*\d{1,4}\s*手|last\s+hand|recent\s+hands?|past\s+hands?|hand\s*#?\s*\d{1,4})/i.test(text)
+    || /(复盘|回顾|review).{0,18}(总结|分析|错误|错在哪|怎么打|打得|主要问题|leak|mistake|summary)/i.test(text)
+    || /(总结|分析|错误|错在哪|怎么打|打得|主要问题|leak|mistake|summary).{0,18}(复盘|回顾|review)/i.test(text);
+  const modeHelp =
+    /(复盘模式|历史模式|历史记录模式|review\s+mode|history\s+mode|replay\s+mode)/i.test(text)
+    || /(怎么|如何|怎样|开启|打开|进入|开始|切到|切换).{0,16}(历史|记录|复盘)/i.test(text)
+    || /(start|enable|open|enter|switch|load).{0,16}(history|review|replay)/i.test(lower);
+  const wantsReview =
+    simpleAnalysis
+    || modeHelp
+    || /(复盘|回顾|历史记录|牌局记录|review|history|past hand|last hand|recent hand)/i.test(text);
+  if (!wantsReview) return null;
+
+  let last = 5;
+  const digitMatch = text.match(/(?:最近|前|last|recent|past)\s*(\d{1,2})\s*(?:手|hands?)?/i)
+    || text.match(/(\d{1,2})\s*(?:手|hands?)\s*(?:牌|hand)?/i);
+  if (digitMatch) last = parseInt(digitMatch[1], 10);
+  const zhMatch = text.match(/(?:最近|前)\s*([一两二三四五六七八九十])\s*手/);
+  if (zhMatch) last = chineseNumberValue(zhMatch[1]) || last;
+  if (/上一手|上手|last\s+hand/i.test(text)) last = 1;
+  last = Math.max(1, Math.min(last || 5, 20));
+
+  const exactMatch = text.match(/第\s*(\d{1,4})\s*手/i) || lower.match(/hand\s*#?\s*(\d{1,4})/i);
+  return {
+    modeHelp: modeHelp && !simpleAnalysis,
+    simpleAnalysis: simpleAnalysis || !modeHelp,
+    last,
+    exactHand: exactMatch ? parseInt(exactMatch[1], 10) : 0,
+  };
+}
+
+function readCompletedHistoryReviewHands() {
+  return completedHistoryHands(reconstructHands(readHistoryEvents(listReviewHistoryFiles())));
+}
+
+function formatHistoryReviewBlock(hands, request) {
+  const selected = selectHistoryReviewHands(hands, request);
+  if (!selected.length) return '';
+  const lines = [
+    `[HAND HISTORY - ${selected.length} completed hand(s) for ${CONFIG.name}]`,
+  ];
+  for (const hand of selected) {
+    const hero = hand.players && hand.players[CONFIG.name];
+    const heroCards = Array.isArray(hero) && Array.isArray(hero[0]) && hero[0].length ? hero[0].join(' ') : 'unknown';
+    const board = Array.isArray(hand.board) && hand.board.length ? hand.board.join(' ') : '(none)';
+    lines.push(`Hand #${hand.hand}${hand.ts ? ` (${hand.ts})` : ''}`);
+    if (hand.blinds) lines.push(`Blinds: ${Array.isArray(hand.blinds) ? hand.blinds.join('/') : hand.blinds}`);
+    if (hand.positions && Object.keys(hand.positions).length) {
+      lines.push(`Positions: ${Object.entries(hand.positions).map(([name, pos]) => `${name}=${pos}`).join(', ')}`);
+    }
+    lines.push(`${CONFIG.name} cards: ${heroCards}`);
+    lines.push(`Board: ${board}`);
+    if (Array.isArray(hand.actions) && hand.actions.length) {
+      lines.push('Actions:');
+      for (const action of hand.actions.slice(-24)) lines.push(`- ${action}`);
+    }
+    if (hand.shownCards && Object.keys(hand.shownCards).length) {
+      lines.push(`Shown cards: ${Object.entries(hand.shownCards).map(([name, cards]) => `${name}=${Array.isArray(cards) ? cards.join(' ') : cards}`).join(', ')}`);
+    }
+    if (Array.isArray(hand.results) && hand.results.length) lines.push(`Result: ${hand.results.join(', ')}`);
+    if (hand.pot != null) lines.push(`Pot: ${hand.pot}`);
+    if (hand.stacks && Object.keys(hand.stacks).length) {
+      lines.push(`Stacks after hand: ${Object.entries(hand.stacks).map(([name, stack]) => `${name}=${stack}`).join(', ')}`);
+    }
+    lines.push('');
+  }
+  lines.push('[/HAND HISTORY]');
+  return lines.join('\n').slice(0, 18000);
+}
+
+function buildSimpleHistoryReviewBlock(request) {
+  const hands = readCompletedHistoryReviewHands();
+  const selected = selectHistoryReviewHands(hands, request);
+  const historyBlock = formatHistoryReviewBlock(hands, request);
+  return {
+    hands: selected,
+    block: historyBlock
+      ? [
+          historyBlock,
+          '[REVIEW ANALYSIS MODE]',
+          'This is a lightweight post-hand review analysis, not historical state replay UI.',
+          'The user may be playing a live hand now. Do not enter review mode, do not ask them to switch modes, and do not output ACTION_JSON.',
+          'Use only completed hand history above for the review summary; use current live state only as background.',
+          'Keep the post-hand review concise: 2-4 lines unless the user asks for deeper analysis.',
+          '[/REVIEW ANALYSIS MODE]',
+        ].join('\n')
+      : '',
+  };
+}
+
+function selectHistoryReviewHands(hands, request) {
+  return request && request.exactHand
+    ? hands.filter(hand => Number(hand.hand) === request.exactHand)
+    : (hands || []).slice(-(request?.last || 5));
+}
+
+function compactHistoryReviewPayload(hands) {
+  return (hands || []).map(hand => {
+    const hero = hand.players && hand.players[CONFIG.name];
+    return {
+      hand: hand.hand,
+      ts: hand.ts || '',
+      phase: hand.phase || '',
+      heroName: CONFIG.name,
+      heroCards: Array.isArray(hero) && Array.isArray(hero[0]) ? hero[0] : [],
+      board: Array.isArray(hand.board) ? hand.board : [],
+      positions: hand.positions || {},
+      actions: Array.isArray(hand.actions) ? hand.actions : [],
+      actionEvents: Array.isArray(hand.actionEvents) ? hand.actionEvents.map(action => ({
+        actor: action.actor || '',
+        action: action.action || '',
+        phase: action.phase || '',
+        amount: action.amount ?? null,
+        ts: action.ts || '',
+      })) : [],
+      results: Array.isArray(hand.results) ? hand.results : [],
+      pot: hand.pot ?? null,
+      stacks: hand.stacks || {},
+    };
+  });
+}
+
+function historyHelpReply() {
+  return [
+    '复盘模式需要先从 StuClaw 的 PokerBot 菜单进入；游戏正在进行中不会切到复盘。',
+    '',
+    '进入后，右侧牌桌会加载历史 state，你可以用复盘条的上一个/下一个 action 或滑杆手动拉到任意状态。',
+    '',
+    '然后在这个 CoachBot 输入框里直接问当前画面，比如“这里为什么不能跟注？”或“这个 action 的主要错误是什么？”。',
+    '',
+    '如果你只是想在比赛中快速复盘上一手，不需要进入复盘模式；直接问“复盘上一手”或“上一手主要错在哪”，我会基于上一手结束时的历史 state 做简短总结。'
+  ].join('\n');
+}
+
+function noCompletedHistoryReply(question) {
+  if (/[\u4e00-\u9fff]/.test(String(question || ''))) {
+    return '还没有可复盘的已完成手牌。比赛中可以继续打；等这一手结束后，直接问“复盘上一手”，我会基于上一手结束时的历史 state 做简短总结。';
+  }
+  return 'No completed hand history is available yet. Keep playing; after a hand ends, ask "review the last hand" and I will summarize it from the hand-end state.';
+}
+
 loadCoachChatIds();
 
 const ACT_NAME = {
@@ -369,6 +879,7 @@ const log = {
 // ── State ───────────────────────────────────────
 let currentState = null;
 let myCards = [];
+let activeReviewSession = null;
 let currentHandNum = 0;
 let joined = false;
 let loggedHandNum = 0;
@@ -382,6 +893,7 @@ let inferredTurnDeadline = 0;
 
 function stateTurnKey(state = currentState) {
   if (!state) return '';
+  if (state.turnId) return `turn:${state.turnId}`;
   return `${state.handNumber || ''}|${state.phase || ''}|${state.currentActor || ''}|${state.callAmount || 0}|${(state.actions || []).length}`;
 }
 
@@ -393,15 +905,15 @@ function isActionableHeroTurn(state = currentState) {
 function mergeLocalTurnDeadline(nextState, previousState = currentState) {
   if (!nextState || typeof nextState !== 'object') return nextState;
   const merged = { ...nextState };
-  const turnKey = `${merged.handNumber || ''}|${merged.phase || ''}|${merged.currentActor || ''}|${(merged.actions || []).length}`;
+  const turnKey = stateTurnKey(merged);
   const incomingDeadline = Number(merged.turnDeadline || 0);
+  const previousDeadline = Number(previousState?.turnDeadline || 0);
   if (incomingDeadline > Date.now()) {
     inferredTurnKey = turnKey;
     inferredTurnDeadline = incomingDeadline;
     return merged;
   }
 
-  const previousDeadline = Number(previousState?.turnDeadline || 0);
   const isSameHeroTurn =
     previousDeadline > Date.now() &&
     merged.isMyTurn === true &&
@@ -696,61 +1208,107 @@ async function refreshPlayerStateFromUpstream(reason = 'manual') {
 
 function parseCoachActionDirective(text) {
   const rawText = String(text || '');
-  const lineMatch = rawText.match(/(?:^|\n)\s*ACTION_JSON\s*:\s*(\{[^\n]*\})\s*(?=\n|$)/i);
-  const jsonText = lineMatch ? lineMatch[1] : (/^\s*\{[\s\S]*\}\s*$/.test(rawText) ? rawText.trim() : null);
+  const marker = rawText.match(/(^|\n)[ \t]*ACTION_JSON[ \t]*:/i);
+  let directiveStart = null;
+  let jsonText = null;
+  if (marker && typeof marker.index === 'number') {
+    directiveStart = marker.index;
+    let cursor = marker.index + marker[0].length;
+    while (cursor < rawText.length && /\s/.test(rawText[cursor])) cursor += 1;
+    if (rawText[cursor] === '{') {
+      let depth = 0;
+      let inString = false;
+      let escaped = false;
+      for (let i = cursor; i < rawText.length; i += 1) {
+        const ch = rawText[i];
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (ch === '\\') escaped = true;
+          else if (ch === '"') inString = false;
+          continue;
+        }
+        if (ch === '"') inString = true;
+        else if (ch === '{') depth += 1;
+        else if (ch === '}') {
+          depth -= 1;
+          if (depth === 0) {
+            jsonText = rawText.slice(cursor, i + 1);
+            break;
+          }
+        }
+      }
+    }
+  } else if (/^\s*\{[\s\S]*\}\s*$/.test(rawText)) {
+    directiveStart = 0;
+    jsonText = rawText.trim();
+  }
   let action = null;
   if (jsonText) {
     try { action = JSON.parse(jsonText); } catch { action = null; }
   }
-  const displayText = rawText
-    .replace(/(?:^|\n)\s*ACTION_JSON\s*:\s*\{[^\n]*\}\s*(?=\n|$)/gi, '\n')
-    .trim();
+  const displayText = directiveStart === null ? rawText.trim() : rawText.slice(0, directiveStart).trim();
   return { action, displayText };
 }
 
 function createCoachVisibleStreamFilter() {
-  let buffer = '';
-  let suppressingActionLine = false;
-  const actionPrefix = /(?:^|\n)[ \t]*ACTION_JSON[ \t]*:/i;
-  const completeActionLine = /(?:^|\n)[ \t]*ACTION_JSON[ \t]*:\s*\{[^\n]*\}\s*(?=\n|$)/gi;
-  const keepChars = 96;
+  let pendingLineStart = '';
+  let atLineStart = true;
+  let suppressingActionTail = false;
+
+  const classifyLineStart = (value) => {
+    const stripped = String(value || '').replace(/^[ \t]*/, '');
+    if (!stripped) return 'maybe';
+    if (/^ACTION_JSON[ \t]*:/i.test(stripped)) return 'action';
+    if (/^ACTION_JSON[ \t]*$/i.test(stripped)) return 'maybe';
+    return 'ACTION_JSON'.startsWith(stripped.toUpperCase()) ? 'maybe' : 'safe';
+  };
 
   return {
     push(chunk) {
       if (!chunk) return '';
-      buffer += String(chunk);
+      if (suppressingActionTail) return '';
+      let visible = '';
 
-      if (suppressingActionLine) {
-        const newlineIndex = buffer.indexOf('\n');
-        if (newlineIndex === -1) {
-          buffer = buffer.slice(-2048);
-          return '';
+      for (const ch of String(chunk)) {
+        if (suppressingActionTail) continue;
+
+        if (!atLineStart) {
+          visible += ch;
+          if (ch === '\n') atLineStart = true;
+          continue;
         }
-        buffer = buffer.slice(newlineIndex + 1);
-        suppressingActionLine = false;
+
+        pendingLineStart += ch;
+        if (ch === '\n') {
+          visible += pendingLineStart;
+          pendingLineStart = '';
+          atLineStart = true;
+          continue;
+        }
+
+        const state = classifyLineStart(pendingLineStart);
+        if (state === 'action') {
+          pendingLineStart = '';
+          suppressingActionTail = true;
+          continue;
+        }
+        if (state === 'maybe') continue;
+
+        visible += pendingLineStart;
+        pendingLineStart = '';
+        atLineStart = false;
       }
 
-      const match = buffer.match(actionPrefix);
-      if (match && typeof match.index === 'number') {
-        const visible = buffer.slice(0, match.index);
-        buffer = buffer.slice(match.index);
-        suppressingActionLine = true;
-        return visible;
-      }
-
-      if (buffer.length <= keepChars) return '';
-      const visible = buffer.slice(0, -keepChars);
-      buffer = buffer.slice(-keepChars);
       return visible;
     },
     flush() {
-      if (suppressingActionLine) {
-        buffer = '';
-        suppressingActionLine = false;
+      if (suppressingActionTail) {
+        pendingLineStart = '';
         return '';
       }
-      const visible = buffer.replace(completeActionLine, '\n').trimEnd();
-      buffer = '';
+      const state = classifyLineStart(pendingLineStart);
+      const visible = state === 'action' ? '' : pendingLineStart;
+      pendingLineStart = '';
       return visible;
     },
   };
@@ -758,9 +1316,16 @@ function createCoachVisibleStreamFilter() {
 
 function normalizeCoachAction(action) {
   if (!action || typeof action !== 'object') throw new Error('missing action JSON object');
-  const verb = String(action.action || '').toLowerCase();
+  let verb = String(action.action || '').toLowerCase();
   if (!['fold', 'check', 'call', 'bet', 'raise'].includes(verb)) {
     throw new Error(`unsupported action "${action.action}"`);
+  }
+  const legalActions = Array.isArray(currentState?.legalActions) ? currentState.legalActions : [];
+  const legalNames = new Set(legalActions.map(item => String(item.action || item).toLowerCase()));
+  if (legalNames.size && !legalNames.has(verb)) {
+    if (verb === 'bet' && legalNames.has('raise')) verb = 'raise';
+    else if (verb === 'raise' && legalNames.has('bet')) verb = 'bet';
+    else throw new Error(`illegal action "${verb}"; legal actions: ${Array.from(legalNames).join(', ')}`);
   }
   const payload = { action: verb };
   if (verb === 'bet' || verb === 'raise') {
@@ -768,6 +1333,11 @@ function normalizeCoachAction(action) {
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new Error(`${verb} requires a positive numeric amount`);
     }
+    const legal = legalActions.find(item => String(item.action || item).toLowerCase() === verb);
+    const min = Number(legal?.minAmount);
+    const max = Number(legal?.maxAmount);
+    if (Number.isFinite(min) && amount < min) throw new Error(`${verb} amount must be at least $${min}`);
+    if (Number.isFinite(max) && amount > max) throw new Error(`${verb} amount must be at most $${max}`);
     payload.amount = amount;
   }
   return payload;
@@ -790,6 +1360,20 @@ async function submitCoachAction(action, expectedTurnKey = '') {
   return result;
 }
 
+function broadcastReviewSession(reason = '') {
+  const payload = reviewSessionPayload(activeReviewSession);
+  wsBroadcast({ type: 'review', ...payload, reason, ts: new Date().toISOString() });
+  if (!payload.active && currentState) {
+    wsBroadcast({ type: 'state', state: currentState });
+  }
+}
+
+function closeReviewSession(reason = '') {
+  if (!activeReviewSession) return;
+  activeReviewSession = null;
+  broadcastReviewSession(reason || 'closed');
+}
+
 function connectUpstream() {
   log.info(`Connecting to ${CONFIG.serverUrl} as "${CONFIG.name}"...`);
 
@@ -809,6 +1393,14 @@ function connectUpstream() {
     try {
       const msg = JSON.parse(raw.toString());
       handleServerMessage(msg);
+      if (activeReviewSession && ['state', 'cards', 'your_turn', 'hand_result'].includes(msg.type)) {
+        const nextLiveState = msg.type === 'state' ? msg.state : currentState;
+        if (isLiveHandInProgress(nextLiveState)) {
+          closeReviewSession('live_started');
+        } else {
+          return;
+        }
+      }
       // Forward to browser clients
       wsBroadcast(msg);
     } catch (e) {
@@ -896,9 +1488,11 @@ function handleServerMessage(msg) {
         currentState.minRaise = msg.minRaise;
         currentState.maxRaise = msg.maxRaise;
         currentState.currentActor = CONFIG.name;
+        if (msg.turnId) currentState.turnId = msg.turnId;
+        if (Array.isArray(msg.legalActions)) currentState.legalActions = msg.legalActions;
         if (Number(msg.turnDeadline || 0) > Date.now()) {
           currentState.turnDeadline = msg.turnDeadline;
-          inferredTurnKey = `${currentState.handNumber || ''}|${currentState.phase || ''}|${currentState.currentActor || ''}|${(currentState.actions || []).length}`;
+          inferredTurnKey = stateTurnKey(currentState);
           inferredTurnDeadline = msg.turnDeadline;
         } else {
           delete currentState.turnDeadline;
@@ -925,7 +1519,9 @@ function handleServerMessage(msg) {
         communityCards: msg.board || currentState?.communityCards || [],
         board: msg.board || currentState?.board || [],
         currentActor: null,
+        turnId: null,
         isMyTurn: false,
+        legalActions: [],
         callAmount: 0,
         minRaise: 0,
         maxRaise: 0,
@@ -934,7 +1530,7 @@ function handleServerMessage(msg) {
       myCards = [];
       writeJSON(STATE_FILE, currentState);
       logStateProgress(currentState);
-      wsBroadcast({ type: 'state', state: currentState });
+      if (!activeReviewSession) wsBroadcast({ type: 'state', state: currentState });
 
       // Write hand.ended — information-isolated
       const stacks = {};
@@ -1026,6 +1622,89 @@ const httpServer = http.createServer((req, res) => {
   if (req.method === 'GET' && (req.url === '/state' || req.url.startsWith('/state?'))) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(currentState || { phase: 'waiting', players: [] }));
+    return;
+  }
+
+  // GET/POST /review → historical state replay mode.
+  // POST body: { action:"start"|"prev"|"next"|"goto"|"exit", index?, hand? }
+  // Review mode is intentionally blocked while a live hand is in progress.
+  if (req.method === 'GET' && req.url === '/review') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: true,
+      liveInProgress: isLiveHandInProgress(),
+      ...reviewSessionPayload(activeReviewSession),
+    }));
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/review') {
+    let body = '';
+    req.on('data', c => {
+      body += c;
+      if (body.length > 3000) { req.destroy(); }
+    });
+    req.on('end', () => {
+      try {
+        const payload = body.trim() ? JSON.parse(body) : {};
+        const action = String(payload.action || 'start');
+
+        if (action === 'exit') {
+          closeReviewSession('exit');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, active: false }));
+          return;
+        }
+
+        if (action === 'start') {
+          if (isLiveHandInProgress()) {
+            res.writeHead(409, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'review mode is disabled while a live hand is in progress' }));
+            return;
+          }
+          const session = createReviewSession({ hand: payload.hand, index: payload.index });
+          if (session.error) {
+            const status = session.error === 'no_history' || session.error === 'hand_not_found' ? 404 : 500;
+            const error = session.error === 'no_history'
+              ? 'no completed hand history found'
+              : session.error === 'hand_not_found'
+                ? `hand #${session.hand} was not found`
+                : 'could not build review states';
+            res.writeHead(status, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error }));
+            return;
+          }
+          activeReviewSession = session;
+          broadcastReviewSession('start');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, ...reviewSessionPayload(activeReviewSession) }));
+          return;
+        }
+
+        if (!activeReviewSession) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'review mode is not active' }));
+          return;
+        }
+
+        if (action === 'next') activeReviewSession.index += 1;
+        else if (action === 'prev') activeReviewSession.index -= 1;
+        else if (action === 'goto') activeReviewSession.index = Number(payload.index) || 0;
+        else if (action !== 'refresh') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'unknown review action' }));
+          return;
+        }
+
+        activeReviewSession.index = Math.max(0, Math.min(activeReviewSession.index, activeReviewSession.steps.length - 1));
+        broadcastReviewSession(action);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, ...reviewSessionPayload(activeReviewSession) }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+    });
     return;
   }
 
@@ -1138,34 +1817,10 @@ const httpServer = http.createServer((req, res) => {
         return;
       }
 
-      // Determine which files to read
-      let filesToRead = [];
       const sessionParam = params.get('session');
-      if (sessionParam) {
-        const fp = path.join(HISTORY_DIR, path.basename(sessionParam));
-        if (fs.existsSync(fp)) filesToRead = [fp];
-      } else {
-        // Default: current session file. Also check legacy history.jsonl
-        if (fs.existsSync(historyFile)) filesToRead = [historyFile];
-        const legacyFile = path.join(PROFILE_DIR, 'history.jsonl');
-        if (filesToRead.length === 0 && fs.existsSync(legacyFile)) filesToRead = [legacyFile];
-      }
-
-      // Parse events from selected files
-      let events = [];
-      for (const fp of filesToRead) {
-        const content = fs.readFileSync(fp, 'utf-8').trim();
-        if (content) {
-          events = events.concat(content.split('\n').map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean));
-        }
-      }
-
-      // Reconstruct hands. Supports new structured events plus legacy
-      // hand_start/action/board/hand_end JSONL.
-      const hands = reconstructHands(events);
       let lastN = parseInt(params.get('last') || '0', 10);
       if (isNaN(lastN) || lastN < 0) lastN = 0;
-      const result = lastN > 0 ? hands.slice(-lastN) : hands;
+      const result = readHistoryHands({ session: sessionParam || '', last: lastN });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result));
     } catch (e) {
@@ -1278,8 +1933,8 @@ const httpServer = http.createServer((req, res) => {
   //   question  — prompt sent to the mapped Codex CoachBot thread
   //   silent    — if true, do NOT echo user message to browser (for narrator)
   //   headline  — optional short user-visible line (shown instead of raw question)
-  // Relay auto-prepends a fresh [CURRENT GAME STATE] block to the question so
-  // CoachBot always reasons on live state — see buildStateBlock() below.
+  // Relay auto-prepends fresh context: live state, active review-mode state,
+  // or completed-hand history for lightweight "review last hand" analysis.
   // Always broadcasts the assistant reply, always shows the thinking indicator.
   // Returns { ok, content }.
   if (req.method === 'POST' && req.url === '/coach-ask') {
@@ -1289,7 +1944,7 @@ const httpServer = http.createServer((req, res) => {
       if (body.length > 20000) { req.destroy(); }
     });
     req.on('end', async () => {
-      let question, silent = false, headline = null, allowAction = false, displayQuestion = null;
+      let question, silent = false, headline = null, allowAction = false, displayQuestion = null, historyRequest = null;
       try {
         const parsed = JSON.parse(body);
         question = parsed.question;
@@ -1302,6 +1957,7 @@ const httpServer = http.createServer((req, res) => {
           res.end(JSON.stringify({ ok: false, error: 'missing question' }));
           return;
         }
+        historyRequest = activeReviewSession ? null : detectHistoryReviewRequest(displayQuestion || question);
       } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -1339,6 +1995,32 @@ const httpServer = http.createServer((req, res) => {
           persisted: true,
         });
       }
+
+      let simpleHistoryReview = null;
+      if (historyRequest?.modeHelp) {
+        const record = persistAndBroadcastCoachMessage({
+          role: 'assistant',
+          content: historyHelpReply(),
+          ts: new Date().toISOString(),
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, content: record.content, historyHelp: true }));
+        return;
+      }
+      if (historyRequest?.simpleAnalysis) {
+        simpleHistoryReview = buildSimpleHistoryReviewBlock(historyRequest);
+        if (!simpleHistoryReview.hands.length || !simpleHistoryReview.block) {
+          const record = persistAndBroadcastCoachMessage({
+            role: 'assistant',
+            content: noCompletedHistoryReply(displayQuestion || question),
+            ts: new Date().toISOString(),
+          });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, content: record.content, historyReview: true, noHistory: true }));
+          return;
+        }
+      }
+
       // Count this invocation BEFORE dispatching — the counter drives the
       // periodic compact+reload maintenance (see MAINTENANCE_PROMPT).
       coachInvocationCount++;
@@ -1352,23 +2034,26 @@ const httpServer = http.createServer((req, res) => {
       // "thinking..." row under the empty bubble. `coach-thinking` is still
       // used by maintenance (which doesn't stream).
       try {
-        try {
-          await refreshPlayerStateFromUpstream('coach-ask');
-        } catch (e) {
-          log.warn(`Could not refresh upstream state before CoachBot prompt: ${e.message}`);
+        if (!activeReviewSession) {
+          try {
+            await refreshPlayerStateFromUpstream('coach-ask');
+          } catch (e) {
+            log.warn(`Could not refresh upstream state before CoachBot prompt: ${e.message}`);
+          }
         }
 
-        // Prepend a fresh [CURRENT GAME STATE] block so the subprocess CoachBot
-        // always reasons on live state, not its stale session memory (it only
-        // auto-refreshes on `your_turn` / `hand_result` from narrator). Format
-        // mirrors narrator.js stateSummary — bounded by delimiters so CoachBot
-        // can distinguish the context block from the actual user question.
+        // Prepend active review-mode state when the UI is replaying history;
+        // otherwise use live state, optionally plus completed-hand history
+        // for lightweight in-game post-hand review.
+        const reviewContextBlock = activeReviewSession ? buildReviewStateBlock(activeReviewSession) : '';
+        const contextBlock = reviewContextBlock || [buildStateBlock(), simpleHistoryReview?.block].filter(Boolean).join('\n\n');
+        const effectiveAllowAction = allowAction && !activeReviewSession && !simpleHistoryReview;
         const requestTurnKey = stateTurnKey(currentState);
-        const cancelTurnKey = allowAction && isActionableHeroTurn(currentState) ? requestTurnKey : '';
-        const actionAuth = allowAction
+        const cancelTurnKey = effectiveAllowAction && isActionableHeroTurn(currentState) ? requestTurnKey : '';
+        const actionAuth = effectiveAllowAction
           ? '[ACTION AUTHORIZATION]\nThis user-facing chat request may submit an ACTION_JSON only if the latest user message explicitly asks you to execute, act, submit, or play the decision on their behalf, or if the request is from auto-play. If the user is only asking for advice or analysis, do not output ACTION_JSON.\n[/ACTION AUTHORIZATION]'
           : '[ACTION AUTHORIZATION]\nDo NOT output ACTION_JSON for this request. Give advice only.\n[/ACTION AUTHORIZATION]';
-        const fullQuestion = buildStateBlock() + '\n\n' + actionAuth + '\n\n' + question;
+        const fullQuestion = contextBlock + '\n\n' + actionAuth + '\n\n' + question;
 
         // Stream text deltas to the browser as they arrive so the user sees
         // the reasoning appear in real time. In auto-play mode, narrator sets
@@ -1410,7 +2095,6 @@ const httpServer = http.createServer((req, res) => {
         };
 
         const onEvent = (evt) => {
-          logCoachCodexEvent(evt, { streamId });
           if (evt && evt.type && evt.type !== 'stderr' && evt.type !== 'log') {
             openStream();
             wsBroadcast({ type: 'coach-stuclaw-event', id: streamId, event: evt });
@@ -1441,7 +2125,7 @@ const httpServer = http.createServer((req, res) => {
         // no user message echo). A non-silent call means the user typed the
         // question — prioritize it so narrator's backlog of auto-turns
         // doesn't force the user to wait.
-        const reply = await runCoach(fullQuestion, onEvent, !silent, { cancelTurnKey });
+        const reply = await runCoach(fullQuestion, onEvent, !silent, { cancelTurnKey, onStart: openStream });
         if (!reply) {
           flushCoachDelta();
           if (streamOpened) {
@@ -1467,7 +2151,7 @@ const httpServer = http.createServer((req, res) => {
           wsBroadcast({ type: 'coach-stream-end', id: streamId, content: displayReply, ts, workedMs });
         }
         let actionResult = null;
-        if (allowAction && parsedReply.action) {
+        if (effectiveAllowAction && parsedReply.action) {
           try {
             actionResult = await submitCoachAction(parsedReply.action, requestTurnKey);
           } catch (actionErr) {
@@ -1546,10 +2230,12 @@ wss.on('connection', (clientWs, req) => {
     gameId: GAME_ID,
   });
 
-  if (currentState) {
+  if (activeReviewSession) {
+    wsSend(clientWs, 'review', reviewSessionPayload(activeReviewSession));
+  } else if (currentState) {
     wsSend(clientWs, 'state', { state: currentState });
   }
-  if (myCards.length > 0) {
+  if (!activeReviewSession && myCards.length > 0) {
     wsSend(clientWs, 'cards', { cards: myCards });
   }
   if (role === 'browser') {
@@ -1583,8 +2269,9 @@ wss.on('connection', (clientWs, req) => {
           seat: me ? me.seat : 0,
           stack: me ? me.stack : 1000,
         });
-        if (currentState) wsSend(clientWs, 'state', { state: currentState });
-        if (myCards.length > 0) wsSend(clientWs, 'cards', { cards: myCards });
+        if (activeReviewSession) wsSend(clientWs, 'review', reviewSessionPayload(activeReviewSession));
+        else if (currentState) wsSend(clientWs, 'state', { state: currentState });
+        if (!activeReviewSession && myCards.length > 0) wsSend(clientWs, 'cards', { cards: myCards });
       } else if (msg.type === 'action') {
         upstreamPostJSON('/action', {
           player: CONFIG.name,
@@ -1726,7 +2413,14 @@ const MAINTENANCE_PROMPT = [
 // final assistant text (accumulated from text_delta events or result.result).
 function runCoach(question, onEvent, priority = false, options = {}) {
   return new Promise((resolve, reject) => {
-    const item = { question, resolve, reject, onEvent, cancelTurnKey: options.cancelTurnKey || '' };
+    const item = {
+      question,
+      resolve,
+      reject,
+      onEvent,
+      onStart: typeof options.onStart === 'function' ? options.onStart : null,
+      cancelTurnKey: options.cancelTurnKey || '',
+    };
     if (priority) coachQueue.unshift(item);
     else coachQueue.push(item);
     drainCoachQueue();
@@ -1810,30 +2504,31 @@ function buildStateBlock() {
   const cards = myCards.length ? myCards.join(' ') : (s.myCards && s.myCards.length ? s.myCards.join(' ') : '(hidden / not dealt)');
   const positions = s.positions ? JSON.stringify(s.positions) : '{}';
   const recent = (s.actions || s.recentActions || []).slice(-8).map(a =>
-    `${a.actor} ${a.action}${a.amount ? ' ' + a.amount : ''}`
+      `${a.actor} ${a.action}${a.amount ? ' ' + a.amount : ''}`
   ).join(' → ') || '(none)';
-  // Legal-action derivation — mirrors the UI button logic in poker-table.html:
-  //   callAmount === 0 → { check, fold, (bet minR-maxR if canRaise) }
-  //   callAmount  > 0  → { call ca, fold, (raise minR-maxR if canRaise) }
-  // Explicit list prevents CoachBot from selecting `check` when a bet is
-  // outstanding (previous bug: "Must call $100 or fold" rejections).
+  const formatLegal = item => {
+    const action = String(item?.action || item || '');
+    if (action === 'call') return `call $${item.amount || s.callAmount || 0}`;
+    if (action === 'bet' || action === 'raise') {
+      const min = item.minAmount ?? s.minRaise ?? 0;
+      const max = item.maxAmount ?? s.maxRaise ?? 0;
+      return `${action} $${min}-$${max} (total bet)`;
+    }
+    return action;
+  };
   let turnLine;
   const actionableTurn = s.isMyTurn && !['waiting', 'showdown', 'ended'].includes(s.phase);
   if (actionableTurn) {
     const ca   = s.callAmount || 0;
     const minR = s.minRaise   || 0;
     const maxR = s.maxRaise   || 0;
-    const canRaise = maxR >= minR && maxR > 0;
-    const legal = [];
-    if (ca === 0) {
-      legal.push('check');
-      legal.push('fold');
-      if (canRaise) legal.push(`bet $${minR}-$${maxR}`);
-    } else {
-      legal.push(`call $${ca}`);
-      legal.push('fold');
-      if (canRaise) legal.push(`raise $${minR}-$${maxR} (total bet)`);
-    }
+    const legal = Array.isArray(s.legalActions) && s.legalActions.length
+      ? s.legalActions.map(formatLegal)
+      : [
+          ca === 0 ? 'check' : `call $${ca}`,
+          'fold',
+          maxR >= minR && maxR > 0 ? `${ca === 0 ? 'bet' : 'raise'} $${minR}-$${maxR} (total bet)` : '',
+        ].filter(Boolean);
     const warn = ca > 0
       ? '  ⚠ "check" is ILLEGAL here — you must call, raise, or fold.'
       : '';
@@ -1865,11 +2560,16 @@ function buildStateBlock() {
 
 function spawnCodexAgent(prompt, { resume = true, json = false, onEvent = null, cancelTurnKey = '' } = {}) {
   return new Promise((resolve, reject) => {
-    const args = [
-      CODEX_AGENT,
-      '--session-key', COACH_SESSION_KEY,
-      '--model', COACH_MODEL,
-    ];
+    let args;
+    try {
+      args = codexAgentArgs([
+        '--session-key', COACH_SESSION_KEY,
+        '--model', COACH_MODEL,
+      ]);
+    } catch (err) {
+      reject(err);
+      return;
+    }
     if (resume) args.push('--resume');
     if (json || onEvent) args.push('--json');
     args.push(prompt);
@@ -1886,8 +2586,39 @@ function spawnCodexAgent(prompt, { resume = true, json = false, onEvent = null, 
         try { proc.kill('SIGTERM'); } catch {}
       }
     }, 1000) : null;
-    let stdout = '', stderr = '', assistantText = '';
+    let stdout = '', stderr = '', assistantText = '', assistantDeltaText = '';
+    const agentMessagePhases = new Map();
     let buf = '';
+    const handleJsonLine = (line) => {
+      if (!line.trim()) return;
+      let evt;
+      try { evt = JSON.parse(line); } catch { return; }
+      const item = evt && evt.item;
+      if ((evt.type === 'item.started' || evt.type === 'item.updated' || evt.type === 'item.completed')
+          && item
+          && item.type === 'agent_message'
+          && item.id
+          && item.phase) {
+        agentMessagePhases.set(String(item.id), String(item.phase));
+      }
+      if (onEvent) {
+        try { onEvent(evt); } catch { /* swallow handler errors */ }
+      }
+      if (evt.type === 'item.delta'
+          && evt.item_type === 'agent_message'
+          && typeof evt.delta === 'string') {
+        const itemId = String(evt.item_id || '');
+        const phase = String(evt.phase || (itemId ? agentMessagePhases.get(itemId) || '' : ''));
+        if (phase !== 'commentary') assistantDeltaText += evt.delta;
+      }
+      if (evt.type === 'item.completed'
+          && item
+          && item.type === 'agent_message'
+          && typeof item.text === 'string') {
+        const phase = String(item.phase || '');
+        if (!phase || phase === 'final_answer') assistantText = item.text;
+      }
+    };
     proc.stdout.on('data', d => {
       const chunk = d.toString();
       stdout += chunk;
@@ -1897,23 +2628,17 @@ function spawnCodexAgent(prompt, { resume = true, json = false, onEvent = null, 
       while ((idx = buf.indexOf('\n')) !== -1) {
         const line = buf.slice(0, idx);
         buf = buf.slice(idx + 1);
-        if (!line.trim()) continue;
-        let evt;
-        try { evt = JSON.parse(line); } catch { continue; }
-        if (onEvent) {
-          try { onEvent(evt); } catch { /* swallow handler errors */ }
-        }
-        if (evt.type === 'item.completed'
-            && evt.item
-            && evt.item.type === 'agent_message'
-            && typeof evt.item.text === 'string') {
-          assistantText = evt.item.text;
-        }
+        handleJsonLine(line);
       }
     });
     proc.stderr.on('data', d => { stderr += d.toString(); });
     proc.on('close', code => {
       if (cancelWatcher) clearInterval(cancelWatcher);
+      if ((json || onEvent) && buf.trim()) {
+        handleJsonLine(buf);
+        buf = '';
+      }
+      if (!assistantText && assistantDeltaText.trim()) assistantText = assistantDeltaText;
       resolve({ code, stdout, stderr, assistantText, canceled });
     });
     proc.on('error', err => {
@@ -1926,13 +2651,16 @@ function spawnCodexAgent(prompt, { resume = true, json = false, onEvent = null, 
 async function drainCoachQueue() {
   if (coachBusy || coachQueue.length === 0) return;
   coachBusy = true;
-  const { question, resolve, reject, onEvent, cancelTurnKey } = coachQueue.shift();
+  const { question, resolve, reject, onEvent, onStart, cancelTurnKey } = coachQueue.shift();
 
   try {
     if (cancelTurnKey && (!isActionableHeroTurn(currentState) || stateTurnKey(currentState) !== cancelTurnKey)) {
       log.warn('CoachBot queued request became stale before it started — skipping');
       resolve('');
       return;
+    }
+    if (onStart) {
+      try { onStart(); } catch { /* ignore UI callback errors */ }
     }
     if (!coachSessionReady) {
       log.info(`CoachBot session ${COACH_SESSION_KEY} initializing/refreshed...`);

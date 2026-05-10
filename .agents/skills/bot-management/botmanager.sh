@@ -35,7 +35,19 @@ PROMPT_TURN="$PROJECT_ROOT/.agents/skills/bot-management/botmanager-turn.md"
 BOTS_DIR="$PROJECT_ROOT/.agents/skills/bot-management/bots"
 PID_FILE="$PROJECT_ROOT/.agents/skills/bot-management/.botmanager.pid"
 LOG_FILE="$PROJECT_ROOT/.agents/skills/bot-management/.botmanager.log"
-CODEX_AGENT="$PROJECT_ROOT/scripts/codex-agent.js"
+resolve_codex_agent() {
+  local candidates=(
+    "${STUCLAW_CODEX_AGENT:-}"
+    "${STUCLAW_DESKTOP_ROOT:+$STUCLAW_DESKTOP_ROOT/scripts/codex-agent.cjs}"
+    "$PROJECT_ROOT/../stuclaw-desktop/scripts/codex-agent.cjs"
+    "$PROJECT_ROOT/../../scripts/codex-agent.cjs"
+  )
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    [ -n "$candidate" ] && [ -f "$candidate" ] && { echo "$candidate"; return; }
+  done
+}
+CODEX_AGENT="$(resolve_codex_agent)"
 
 # ── Defaults ──
 SERVER_URL=""
@@ -89,19 +101,39 @@ log "Using python: $PY"
 
 # Codex adapter (paths.env may pin CODEX_BIN for the subprocess)
 NODE="${NODE:-node}"
-if [ ! -x "$CODEX_AGENT" ]; then
-  log "ERROR: Codex adapter missing at '$CODEX_AGENT'."
+if [ ! -f "$CODEX_AGENT" ]; then
+  log "ERROR: StuClaw Desktop codex-agent runner missing. Set STUCLAW_CODEX_AGENT to stuclaw-desktop/scripts/codex-agent.cjs."
   exit 1
 fi
-log "Using Codex adapter: $NODE $CODEX_AGENT"
+log "Using Codex runner: $NODE $CODEX_AGENT"
+
+is_own_botmanager_pid() {
+  local pid="$1"
+  case "$pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ "$pid" != "$$" ] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  local command
+  command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  [ -n "$command" ] || return 1
+  case "$command" in
+    *"$PROJECT_ROOT/.agents/skills/bot-management/botmanager.sh"*|*"$PROJECT_ROOT/.agents/skills/bot-management/botmanager.js"*) return 0 ;;
+  esac
+  return 1
+}
 
 # ── Kill old BotManager if running ──
 if [ -f "$PID_FILE" ]; then
   OLD_PID=$(cat "$PID_FILE" 2>/dev/null || true)
   if [ -n "$OLD_PID" ] && [ "$OLD_PID" != "$$" ]; then
-    log "Killing old BotManager (PID $OLD_PID)..."
-    kill "$OLD_PID" 2>/dev/null || true
-    sleep 1
+    if is_own_botmanager_pid "$OLD_PID"; then
+      log "Killing old BotManager (PID $OLD_PID)..."
+      kill "$OLD_PID" 2>/dev/null || true
+      sleep 1
+    else
+      log "Stale PID file points at PID $OLD_PID, but it is not this project's BotManager; leaving it alone."
+    fi
   fi
 fi
 
@@ -211,7 +243,7 @@ invoke_bot_turn() {
   local prompt
   prompt=$(build_turn_prompt "$bot") || { log "✗ build_turn_prompt failed for $bot"; return 1; }
 
-  local agent_args=( "$CODEX_AGENT" --session-key "$(bot_session_key "$bot")" --timeout-ms 120000 )
+  local agent_args=( "$CODEX_AGENT" --app-dir "$PROJECT_ROOT" --session-key "$(bot_session_key "$bot")" --timeout-ms 120000 )
   if bot_has_session "$bot"; then
     agent_args+=( --resume )
   fi
@@ -261,6 +293,7 @@ except Exception:
       if [ "$COUNT" -gt "0" ]; then
         log "$COUNT pending turn(s) — invoking Codex agent"
         run_with_timeout 90 "$NODE" "$CODEX_AGENT" \
+          --app-dir "$PROJECT_ROOT" \
           --session-key "pokernow-file-mode" \
           --timeout-ms 90000 \
           "$(cat "$PENDING")" \
